@@ -1,0 +1,6 @@
+{
+  "output_dir": "./output",
+  "contacts_file": "./input/contacts.xlsx",
+  "owner_initials": "",
+  "ncbi_email": ""
+}

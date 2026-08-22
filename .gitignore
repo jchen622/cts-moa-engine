@@ -1,0 +1,9 @@
+cache/
+settings.json
+schedule.log
+gui.log
+output/
+input/
+__pycache__/
+.DS_Store
+**/.DS_Store

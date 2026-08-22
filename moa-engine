@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Wrapper so the tool can be run as ./moa-engine from anywhere.
+cd "$(dirname "$0")" || exit 1
+exec python3 moa_engine.py "$@"
