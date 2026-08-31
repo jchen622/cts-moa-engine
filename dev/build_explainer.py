@@ -286,7 +286,7 @@ def s3(prs):
         ("3. CLASSIFY", "What kind of drug?", ["modality from INN stem", "coverage-gap flag"], ACCENT_LT),
         ("4. ENRICH", "Who worked on it?", ["Phase 1 clin pharm papers", "author affiliations"], ACCENT),
         ("5. RANK", "How urgent?", ["0–100 score", "reasons recorded"], ACCENT_LT),
-        ("6. DELIVER", "Where it lands", ["queue sheet", "dossier + drafts"], GREEN),
+        ("6. DELIVER", "Where it lands", ["queue sheet", "outreach list + drafts"], GREEN),
     ]
     bw2 = Inches(1.94)
     gapx = Inches(0.12)
@@ -663,23 +663,24 @@ def s9(prs):
     s = blank(prs)
     header(s, "running it", "Commands, control, and the safety rails")
 
-    para(tb(s, M, Inches(1.42), CW, Inches(0.3)), "EVERYDAY USE",
+    para(tb(s, M, Inches(1.42), CW, Inches(0.3)),
+         "EVERYDAY USE — most people just press the buttons; this is the same thing",
          size=9.5, bold=True, color=ACCENT, first=True, after=0)
     code(s, M, Inches(1.72), Inches(7.4), [
-        "$ ./moa-engine check              # verify everything; writes nothing",
-        "$ ./moa-engine scan --days 120    # preview candidates; writes nothing",
-        "$ ./moa-engine update --go        # add new candidates to the queue",
-        "$ ./moa-engine dossier --go       # build the ASCPT dossier",
-        "$ ./moa-engine invites --go       # draft the letters, once you've read it",
-    ], size=11)
+        "$ python3 moa_engine.py check           # verify everything; writes nothing",
+        "$ python3 moa_engine.py scan --days 120 # preview candidates; writes nothing",
+        "$ python3 moa_engine.py update --go     # add new candidates to the queue",
+        "$ python3 moa_engine.py dossier --go    # build the outreach list",
+        "$ python3 moa_engine.py invites --go    # draft the letters, once read",
+    ], size=10.5)
 
     para(tb(s, M, Inches(3.28), CW, Inches(0.3)), "TURNING THE SCHEDULE ON AND OFF",
          size=9.5, bold=True, color=ACCENT, first=True, after=0)
     code(s, M, Inches(3.58), Inches(7.4), [
-        "$ ./moa-engine start              # monthly, 7th at 09:17",
-        "$ ./moa-engine status             # on or off?",
-        "$ ./moa-engine stop               # removes it completely",
-    ], size=11)
+        "$ python3 moa_engine.py start           # monthly, 7th at 09:17",
+        "$ python3 moa_engine.py status          # on or off?",
+        "$ python3 moa_engine.py stop            # removes it completely",
+    ], size=10.5)
 
     para(tb(s, M, Inches(4.85), Inches(7.4), Inches(0.9)),
          "It is off by default. If the Mac is asleep the job runs at next wake, and a "
@@ -712,13 +713,14 @@ def s9(prs):
     tf = tb(s, rx + Inches(0.2), Inches(4.28), rw - Inches(0.4), Inches(2.2))
     para(tf, "HANDING IT TO SOMEONE ELSE — ONE FILE", size=9.5, bold=True,
          color=ACCENT, first=True, after=8)
-    para(tf, "Send a single 92 KB file. Nothing to unzip, no folder to keep together.",
+    para(tf, "Send one file, ~93 KB. Nothing to unzip, and it is both the app and "
+             "the command line.",
          size=10.5, color=INK, after=6, line=1.15)
-    para(tf, "CTS MOA Engine.command     Mac\n"
-             "CTS MOA Engine.bat             Windows",
+    para(tf, "SEND THIS/CTS MOA Engine.command     Mac\n"
+             "SEND THIS/CTS MOA Engine.bat             Windows",
          size=10, bold=True, color=ACCENT, after=6, line=1.25)
-    para(tf, "The whole engine is compressed inside and loaded from memory. On first "
-             "run it creates a working folder beside itself for input and results.",
+    para(tf, "Compressed inside and loaded from memory. First run creates a working "
+             "folder beside it for input and results.",
          size=10, color=INK_SOFT, after=6, line=1.12)
     para(tf, "No account, no credential, no API key, no server. The only requirement "
              "is Python 3.",
@@ -772,7 +774,7 @@ def s10(prs):
     qs = ["Who owns the queue — a named AE, a rotation, or the A-team?",
           "What is the score threshold for actually inviting someone?",
           "Do we chase the contact grid, or route invitations through ASCPT?",
-          "Should the dossier be shared with the whole AE group before the meeting?",
+          "Should the outreach list be shared with the whole AE group?",
           "Does this stay on a laptop, or move somewhere the journal controls?"]
     for i, q in enumerate(qs):
         y = Inches(1.8) + Inches(0.92) * i
