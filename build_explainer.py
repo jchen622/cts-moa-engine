@@ -184,8 +184,8 @@ def s1(prs):
     tf2 = tb(s, M, Inches(3.5), Inches(7.4), Inches(1.4))
     para(tf2, "A small program that watches every FDA approval, keeps only the "
               "genuinely novel agents, ranks them for the MOA mini-review series, and "
-              "once a year tells you which sponsors will be standing at which poster "
-              "at the ASCPT Annual Meeting.",
+              "then names the clinical pharmacologist at the company who actually "
+              "worked on each drug.",
          size=13, color=INK_SOFT, first=True, after=0, line=1.2)
 
     for i, (t, d) in enumerate([
@@ -207,9 +207,9 @@ def s1(prs):
     tf4 = tb(s, M + Inches(8.35), Inches(2.05), CW - Inches(8.6), Inches(4.4))
     para(tf4, "IN ONE RUN, TODAY", size=9.5, bold=True, color=ACCENT, first=True, after=10)
     for big, small in [("29,278", "FDA applications indexed"),
-                       ("25", "novel agents in the current queue"),
-                       ("18/19", "published MOA papers the filter would have found"),
-                       ("10", "candidates with named ASCPT contacts")]:
+                       ("27", "novel agents in the current queue"),
+                       ("24", "with a named clinical pharmacologist to write to"),
+                       ("18/19", "published MOA papers the filter would have found")]:
         para(tf4, big, size=25, bold=True, color=ACCENT, after=0)
         para(tf4, small, size=10, color=INK_SOFT, after=13, line=1.05)
     footer(s, 1)
@@ -284,7 +284,7 @@ def s3(prs):
         ("1. COLLECT", "Two FDA feeds", ["Drugs@FDA bulk files", "Purple Book (CBER)"], ACCENT),
         ("2. FILTER", "Is it a novel agent?", ["known-moiety index", "new-route rule"], RED),
         ("3. CLASSIFY", "What kind of drug?", ["modality from INN stem", "coverage-gap flag"], ACCENT_LT),
-        ("4. ENRICH", "Who could write it?", ["PubMed prior-review check", "candidate authors"], ACCENT_LT),
+        ("4. ENRICH", "Who worked on it?", ["Phase 1 clin pharm papers", "author affiliations"], ACCENT),
         ("5. RANK", "How urgent?", ["0–100 score", "reasons recorded"], ACCENT_LT),
         ("6. DELIVER", "Where it lands", ["queue sheet", "dossier + drafts"], GREEN),
     ]
@@ -312,9 +312,9 @@ def s3(prs):
     outs = [("MOA candidate queue",
              "Append-only. The machine fills the facts; the AE owner and Status "
              "columns are yours and are never overwritten."),
-            ("ASCPT recruiting dossier",
-             "Ranked candidates joined to the meeting programme — poster numbers, "
-             "times and the names of the people presenting."),
+            ("MOA author outreach list",
+             "Ranked candidates, each with the clinical pharmacologists to contact, "
+             "why they were picked and the PubMed IDs behind it."),
             ("Invitation drafts",
              "One editable draft per candidate, opened in a browser or Word. Nothing is "
              "sent; you review, edit and send each one yourself.")]
@@ -330,9 +330,10 @@ def s3(prs):
     para(tb(s, M, Inches(5.72), CW, Inches(0.3)), "TWO CADENCES",
          size=9.5, bold=True, color=ACCENT, first=True, after=0)
     tf = tb(s, M, Inches(6.02), CW, Inches(0.8))
-    para(tf, "Monthly — a light run tops up the queue so nothing is lost between "
-             "meetings.  ·  Early February — the annual run builds the dossier about "
-             "four weeks before ASCPT, in time to arrange conversations.",
+    para(tf, "Monthly — a light run tops up the queue so nothing is lost.  ·  "
+             "Whenever you are ready to write — build the outreach list and the "
+             "letters. Before ASCPT, drop in the programme or attendee list and the "
+             "same people gain a poster number and a time.",
          size=11.5, color=INK_SOFT, first=True, after=0, line=1.15)
     footer(s, 3)
     notes(s, "Walk left to right. The key point for a sceptical listener is stage 2: "
@@ -539,66 +540,72 @@ def s6(prs):
 
 def s7(prs):
     s = blank(prs)
-    header(s, "the payoff", "The ASCPT dossier — who to find, and where")
+    header(s, "the payoff", "Who to write to — by name, with the evidence")
 
-    para(tb(s, M, Inches(1.42), CW, Inches(0.42)),
-         "Run about four weeks before the Annual Meeting. It joins the ranked queue to "
-         "your programme export, so a candidate drug becomes a named person at a "
-         "numbered poster at a known time.",
+    para(tb(s, M, Inches(1.40), CW, Inches(0.40)),
+         "The objective is reaching the clinical pharmacologist who actually worked on "
+         "the drug. The tool finds them in PubMed and says why it picked them.",
          size=11.5, color=INK_SOFT, first=True, after=0, line=1.12)
 
-    para(tb(s, M, Inches(1.98), CW, Inches(0.3)),
-         "ACTUAL OUTPUT FROM THE CURRENT RUN", size=9.5, bold=True, color=ACCENT,
-         first=True, after=0)
-    rows = [["#", "Drug", "Score", "Leads", "Who to find at the meeting"],
-            ["1", "insulin icodec", "84", "2", "Novo Nordisk — 2 posters, Poster Session I"],
-            ["2", "orforglipron", "84", "3",
-             "Brian Moser (Eli Lilly) — Poster PI-072, Session I, 3/4 5:00 PM"],
-            ["5", "iberdomide", "74", "3",
-             "Can Liu (Bristol-Myers Squibb) — Poster PI-066, Session I, 3/4 5:00 PM"],
-            ["12", "bulevirtide", "56", "6",
-             "Jin Zhou (Gilead Sciences) — Poster PI-014, Session I, 3/4 5:00 PM"]]
-    table(s, M, Inches(2.3), CW, rows,
-          [Inches(0.42), Inches(1.9), Inches(0.62), Inches(0.68), CW - Inches(3.62)],
-          size=10, row_h=Inches(0.36))
+    para(tb(s, M, Inches(1.90), CW, Inches(0.26)),
+         "THREE PASSES — because author position means different things in different papers",
+         size=9.5, bold=True, color=ACCENT, first=True, after=0)
+    rows = [["", "What it searches", "Where the clinical pharmacologist sits"],
+            ["1", "Food effect · DDI · relative bioavailability · organ impairment · "
+                  "mass balance / ADME · thorough QT · healthy volunteers",
+             "FIRST author — they designed and ran it"],
+            ["2", "Population PK · exposure–response · PBPK",
+             "First or senior author"],
+            ["3", "Dose escalation / first-in-human  (fallback only)",
+             "ANYWHERE — first and last are the treating clinicians"]]
+    table(s, M, Inches(2.20), CW, rows,
+          [Inches(0.34), Inches(6.5), CW - Inches(6.84)], size=9.5, row_h=Inches(0.46))
 
     lw = Inches(6.15)
-    panel(s, M, Inches(4.35), lw, Inches(2.3), fill=WHITE)
-    tf = tb(s, M + Inches(0.2), Inches(4.5), lw - Inches(0.4), Inches(2.0))
-    para(tf, "HOW A MATCH IS MADE — three signals, strongest first", size=11.5,
-         bold=True, color=ACCENT, first=True, after=8)
-    for i, (t, d) in enumerate([
-            ("Drug named in the poster title", "the work is about this drug"),
-            ("Drug named in the abstract text", "often catches what the title omits"),
-            ("Sponsor is the presenting organisation",
-             "that company is in the room, even if the poster is on something else")]):
-        p = tf.add_paragraph(); p.space_after = Pt(7); p.line_spacing = 1.08
-        r = p.add_run(); r.text = f"{i+1}.  {t} — "
-        r.font.name, r.font.size, r.font.bold = FONT, Pt(10.5), True
-        r.font.color.rgb = INK
-        r2 = p.add_run(); r2.text = d
-        r2.font.name, r2.font.size = FONT, Pt(10.5); r2.font.color.rgb = INK_SOFT
-    para(tf, "Reported as leads to check, never as facts: a poster naming a drug does "
-             "not prove the person who owns the molecule is standing there.",
+    panel(s, M, Inches(4.00), lw, Inches(2.10), fill=WHITE, line=RULE)
+    tf = tb(s, M + Inches(0.18), Inches(4.13), lw - Inches(0.36), Inches(1.85))
+    para(tf, "THE CASE THAT PROVES IT ISN'T JUST POSITION", size=9, bold=True,
+         color=ACCENT, first=True, after=6)
+    para(tf, "Pivekimab sunirine, an AbbVie oncology ADC. The Phase 1 paper has "
+             "24 authors.", size=10, color=INK_SOFT, after=6, line=1.1)
+    for t, c in [("first    Naveen Pemmaraju — MD Anderson", RED),
+                 ("20–22    Yining Du · Sribalaji Lakshmikanthan · "
+                  "Jalaja Potluri — AbbVie", GREEN),
+                 ("last     Naval G Daver — MD Anderson", RED)]:
+        para(tf, t, size=9.5, color=c, after=3, line=1.05)
+    para(tf, "The tool returns the three AbbVie authors and neither clinician. Pinned "
+             "as a test so it cannot regress.",
          size=9.5, italic=True, color=MUTED, after=0, line=1.1)
 
     rx = M + Inches(6.45)
     rw = CW - Inches(6.45)
-    panel(s, rx, Inches(4.35), rw, Inches(2.3), fill=BOX_FILL, line=BOX_LINE, rounded=True)
-    tf = tb(s, rx + Inches(0.2), Inches(4.5), rw - Inches(0.4), Inches(2.0))
-    para(tf, "THE ONE MANUAL STEP", size=9.5, bold=True, color=ACCENT, first=True, after=6)
-    para(tf, "The ASCPT programme is rendered in the browser by EventScribe and cannot "
-             "be fetched by any script — every URL returns the same empty shell. So "
-             "once a year you export it yourself and point the tool at the sheet.",
-         size=10.5, color=INK, after=8, line=1.12)
-    para(tf, "Include the Presenting Author columns and you get names. Without them, "
-             "matching still works on company and title — you just lose the person.",
-         size=10.5, color=INK_SOFT, after=0, line=1.12)
+    panel(s, rx, Inches(4.00), rw, Inches(2.10), fill=BOX_FILL, line=BOX_LINE, rounded=True)
+    tf = tb(s, rx + Inches(0.18), Inches(4.13), rw - Inches(0.36), Inches(1.85))
+    para(tf, "TWO THINGS IT HAS TO GET RIGHT", size=9, bold=True, color=ACCENT,
+         first=True, after=6)
+    para(tf, "Acquisitions. Tebipenem is approved to GSK, but every paper comes out of "
+             "Spero, whom GSK bought. Baxdrostat is AstraZeneca; the papers are CinCor. "
+             "The tool infers the company that actually ran the programme.",
+         size=9.5, color=INK, after=6, line=1.1)
+    para(tf, "People move. PubMed records the affiliation at publication, so it reports "
+             "where the work was done and adds “now at …”.",
+         size=9.5, color=INK, after=0, line=1.1)
+
+    para(tb(s, M, Inches(6.28), CW, Inches(0.36)),
+         "Result on the live queue: 24 of 27 candidates get a named clinical "
+         "pharmacologist, 20 of them at the sponsor or the company that ran the "
+         "programme — against a baseline where most read NEEDS LOOKUP.",
+         size=11, bold=True, color=ACCENT, first=True, after=0, line=1.12)
     footer(s, 7)
-    notes(s, "The 2026 programme was used as a stand-in, which is why the dates read "
-             "March 2026. In practice you would drop in the 2027 export. Note that the "
-             "matches shown are real rows from that file — Brian Moser, Can Liu and Jin "
-             "Zhou are genuinely presenting at those poster numbers.")
+    notes(s, "This replaces the old version of this slide, which framed the payoff as "
+             "the ASCPT meeting. The meeting is one channel for reaching the person; "
+             "finding the person is the job.\n\n"
+             "Every name here is real output. The pivekimab example is the important "
+             "one: a naive 'take the first author' rule returns an MD Anderson "
+             "oncologist, which is exactly the wrong person to invite to write a "
+             "clinical pharmacology mini-review.\n\n"
+             "The tool also harvests corresponding-author emails from the affiliation "
+             "string when PubMed carries them.")
 
 
 def s8(prs):
@@ -703,14 +710,18 @@ def s9(prs):
 
     panel(s, rx, Inches(4.12), rw, Inches(2.5), fill=BOX_FILL, line=BOX_LINE, rounded=True)
     tf = tb(s, rx + Inches(0.2), Inches(4.28), rw - Inches(0.4), Inches(2.2))
-    para(tf, "HANDING IT TO SOMEONE ELSE", size=9.5, bold=True, color=ACCENT,
-         first=True, after=8)
-    para(tf, "1.  Copy the folder (not settings.json, cache or output).\n"
-             "2.  They double-click CTS MOA Engine.\n"
-             "3.  There is no step 3.",
-         size=10.5, color=INK, after=8, line=1.2)
-    para(tf, "No account, no credential, no API key, no server. Everything stays on "
-             "the machine it runs on. The only requirement is Python 3.",
+    para(tf, "HANDING IT TO SOMEONE ELSE — ONE FILE", size=9.5, bold=True,
+         color=ACCENT, first=True, after=8)
+    para(tf, "Send a single 92 KB file. Nothing to unzip, no folder to keep together.",
+         size=10.5, color=INK, after=6, line=1.15)
+    para(tf, "CTS MOA Engine.command     Mac\n"
+             "CTS MOA Engine.bat             Windows",
+         size=10, bold=True, color=ACCENT, after=6, line=1.25)
+    para(tf, "The whole engine is compressed inside and loaded from memory. On first "
+             "run it creates a working folder beside itself for input and results.",
+         size=10, color=INK_SOFT, after=6, line=1.12)
+    para(tf, "No account, no credential, no API key, no server. The only requirement "
+             "is Python 3.",
          size=10, color=INK_SOFT, after=0, line=1.12)
     footer(s, 9)
     notes(s, "The portability slide matters for the durability question: the tool is "
@@ -726,23 +737,28 @@ def s10(prs):
     lw = Inches(6.15)
     para(tb(s, M, Inches(1.45), lw, Inches(0.3)), "KNOWN LIMITATIONS",
          size=9.5, bold=True, color=ACCENT, first=True, after=0)
-    bullets(s, M, Inches(1.78), lw, Inches(3.4), [
+    bullets(s, M, Inches(1.72), lw, Inches(3.5), [
         ("EUA products are invisible ",
          "— molnupiravir never entered Drugs@FDA"),
         ("Route data is imperfect ",
          "— Drugs@FDA has no route column; it is parsed out of the dosage form, which "
          "sometimes holds a presentation instead"),
-        ("Contacts are mostly missing ",
-         "— 20 of 25 current candidates read NEEDS LOOKUP, because the contact grid "
-         "has almost no names in it"),
+        ("Names come from the literature, not a staff list ",
+         "— someone who never published on the drug is invisible, and 3 of 27 "
+         "candidates are too new to have any papers at all"),
+        ("Affiliations are as at publication ",
+         "— people move; the tool flags it but cannot confirm where they are now"),
+        ("The ASCPT member directory is behind a login ",
+         "— it is never scraped. The tool writes a short check list of the specific "
+         "names it wants an answer for, which you or ASCPT fill in"),
         ("Programme matches are leads, not facts ",
          "— “sponsor presenting” means someone from that company has a poster"),
         ("CBER depends on Purple Book lag ",
          "— only January was published for 2026 at the time of writing"),
-    ], size=10.5, gap=8)
+    ], size=10, gap=6)
 
-    panel(s, M, Inches(5.3), lw, Inches(1.35), fill=WHITE, line=RED)
-    tf = tb(s, M + Inches(0.2), Inches(5.46), lw - Inches(0.4), Inches(1.1))
+    panel(s, M, Inches(5.5), lw, Inches(1.20), fill=WHITE, line=RED)
+    tf = tb(s, M + Inches(0.2), Inches(5.63), lw - Inches(0.4), Inches(1.0))
     para(tf, "THE BIGGEST ONE", size=9.5, bold=True, color=RED, first=True, after=6)
     para(tf, "It runs on one person's laptop. The tool is portable, but somebody still "
              "has to own it — otherwise this rebuilds the exact dependency that "

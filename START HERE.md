@@ -1,9 +1,12 @@
 # Start here
 
-This folder finds newly approved **novel** drugs that are good candidates for a
-*Mechanism of Action* mini-review in **Clinical and Translational Science**, keeps them in a
-list for you, and once a year works out which of those drug sponsors will be presenting at
-the ASCPT Annual Meeting — so you know who to look for in person.
+This finds newly approved **novel** drugs that are good candidates for a *Mechanism of
+Action* mini-review in **Clinical and Translational Science**, and then works out **which
+clinical pharmacologist at the company actually worked on that drug** — by name, from their
+published Phase 1 clinical pharmacology studies.
+
+That is the whole point: getting the invitation to the right person. The ASCPT meeting
+files are one extra way of reaching them, not the objective.
 
 You do not need to know any programming to use it.
 
@@ -43,6 +46,15 @@ rule for stopping it: close the browser tab.
 
 Just one thing: **Python 3**, from https://www.python.org/downloads/
 
+Nothing else. No Claude, no AI tool, no account, no API key, no login — the engine is
+an ordinary Python program. It talks to two public sources only: the FDA (Drugs@FDA and
+the Purple Book) and PubMed.
+
+> **Mac note.** Every Mac already has a `python3` command, but on a machine without
+> developer tools it is a placeholder that prints Xcode errors instead of running. The
+> launcher tests each Python it finds and skips that one, so if it says Python is
+> missing, it really is — install it from the link above.
+
 On Windows, tick **"Add Python to PATH"** on the first screen of the installer. It is easy to
 miss and nothing works without it.
 
@@ -58,9 +70,9 @@ Google. Everything stays on this computer.
 | **1** | Confirms the tool can reach the FDA and PubMed, and can find your files. | No |
 | **2** | Shows the drugs it found, ranked, so you can look before committing. | No |
 | **3** | Adds any newly approved drugs to your candidate list. | Yes |
-| **4** | Builds the ASCPT meeting dossier — who to find at which poster. | Yes |
+| **4** | Builds the outreach list — who to contact at each company, by name. | Yes |
 | **5** | Drafts the invitation letters. | Yes |
-| **+** | *Optional.* Adds an ASCPT attendee list, if you can get one. | Yes |
+| **+** | *Optional.* Adds a file that helps you reach people — see below. | Yes |
 
 Buttons **1** and **2** are always safe. Buttons **3**, **4** and **5** ask you to confirm
 before they save anything.
@@ -100,16 +112,41 @@ All in the `output` folder. Open them by double-clicking.
 1. **`MOA candidate queue.xlsx`** — the running list. Two columns are yours: **AE owner** and
    **Status**. Type in them freely; the tool never overwrites them. Set **Status** to
    `Published`, `Declined` or `Dropped` to retire a drug from future dossiers.
-2. **`ASCPT <year> MOA recruiting dossier.xlsx`** — the ranked list joined to the meeting
-   programme, with **Attending?** and **Comments** columns for your notes. Re-running button 4
-   keeps everything you have typed, matched up by drug name.
-3. **`MOA invitation drafts <year>.html`** — the letters. Double-click to open in your
+2. **`MOA author outreach list <year>.xlsx`** — the ranked list. The column that matters is
+   **Clin pharm contacts**: the people to write to, with the reason each was picked and the
+   PubMed IDs behind it. **Attending?** and **Comments** are yours; re-running button 4 keeps
+   everything you have typed, matched up by drug name.
+3. **`membership check list.xlsx`** — a short list of just those names, with a blank
+   **ASCPT member?** column. Fill it in (or ask `members@ascpt.org` to), then add it back
+   with the **+** button and every future run remembers.
+4. **`MOA invitation drafts <year>.html`** — the letters. Double-click to open in your
    browser, or open it with Word to edit.
 
 You can edit any of these and re-run. The tool matches your notes back up by drug name, so
 they survive re-ranking.
 
 ---
+
+## How it finds the right person
+
+For each drug it searches PubMed in three passes, because who leads a paper depends on what
+kind of study it is:
+
+1. **Clinical pharmacology studies** — food effect, drug–drug interaction, relative
+   bioavailability, organ impairment, mass balance/ADME, thorough QT, healthy-volunteer PK.
+   These are the ones a clinical pharmacologist designs and **first-authors**.
+2. **Pharmacometrics** — population PK, exposure–response, PBPK.
+3. **Dose-escalation trials** — only as a fallback. On these the first and last authors are
+   the treating clinicians, and the clinical pharmacologist is buried in the middle, so
+   here the tool looks for the **company affiliation** instead of the position.
+
+It reads each author's affiliation from PubMed, so it can tell the sponsor's own staff from
+the hospital investigators. It also spots when the company that ran the studies is not the
+company that now owns the drug — tebipenem is approved to GSK but every paper comes out of
+Spero, which GSK acquired — and says so.
+
+Expect **more than one name per drug**. That is deliberate; usually several people worked
+on it, and you may want them as co-authors.
 
 ## The ASCPT meeting files
 

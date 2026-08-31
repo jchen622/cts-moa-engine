@@ -1,6 +1,34 @@
 # Open items
 
-State as of 2026-08-21. Read alongside `CLAUDE.md`. Delete items as they are done.
+State as of 2026-08-31. Read alongside `CLAUDE.md`. Delete items as they are done.
+
+## Resolved on 2026-08-31 — finding the clinical pharmacologist, and one-file handoff
+
+The objective is now stated as **reaching the company clinical pharmacologist who worked on
+the drug**; the ASCPT meeting is one channel to that person, not the point. Output renamed
+`MOA author outreach list <year>.xlsx` (the old dossier filename is still read, so existing
+annotations migrate), and contacts moved ahead of the ASCPT columns.
+
+- `authors.py` (new) — three-tier PubMed search. Tier 1 clin pharm studies (food effect,
+  DDI, rBA, organ impairment, mass balance/ADME, thorough QT, healthy volunteers), tier 2
+  pharmacometrics, tier 3 dose escalation. Author position is read differently per tier
+  because on a dose-escalation paper first and last are the treating clinicians.
+- Affiliations come from `efetch` XML; `esummary` carries none.
+- Handles acquisitions (`programme_org`) — tebipenem is GSK on paper but Spero in the
+  literature; baxdrostat is AstraZeneca but CinCor. Handles people moving employer.
+- **Live result: 24 of 27 candidates get a named clinical pharmacologist**, 20 at the
+  sponsor or the company that ran the programme.
+- `update --refresh` backfills contacts onto rows already in the queue.
+- ASCPT member directory is an optional upload, plus a `membership check list.xlsx` the
+  tool writes so only specific names need verifying. **The directory is login-gated and is
+  never scraped.**
+- `build_single_file.py` → `dist/CTS MOA Engine.command` and `.bat`, ~92 KB each,
+  sh/Python and batch/Python polyglots. Modules load from memory; a working folder is
+  created beside the file on first run. Mac path smoke-tested from a clean directory;
+  **Windows still untested on real hardware.**
+
+**Still open:** whether ASCPT permits the member directory being used this way — ask rather
+than assume. `members@ascpt.org` is the contact.
 
 ## Resolved on 2026-08-21 — the move off Google Drive
 
@@ -73,9 +101,16 @@ looks for.
 | How strictly sponsors match orgs | `sheets._prefix_match()` — length floor and the no-space rule |
 | Which meeting files are found | `config.meeting_files()` glob, `config.PROGRAM_PATTERN` |
 | What the GUI buttons do | `gui.ACTIONS` (an allowlist — the page cannot name a command) |
+| How people are found and ranked | `authors.py` — `TIERS`, then `rank()` |
+| Which study types count as clin pharm | `authors.CLINPHARM_STUDY` |
+| What lands in the single-file build | `build_single_file.py` — `MODULES`, `DATA` |
 
 **After any change to `sources.py` or `config.py`, run `python3 backtest.py`** — it must stay at
-18/19. **After any change to `store.py` or `sheets.py`, run `python3 selftest.py`.**
+18/19. **After any change to `store.py`, `sheets.py` or `authors.py`, run
+`python3 selftest.py`** — it pins the pivekimab case (three AbbVie authors at positions
+20–22, and neither MD Anderson clinician), the Spero acquisition, and the Vera/Verastem
+false positive. **After changing any module, re-run `python3 build_single_file.py`** or the
+distributables go stale.
 
 ## Verified facts worth not re-deriving
 

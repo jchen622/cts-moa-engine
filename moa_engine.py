@@ -170,19 +170,36 @@ def cmd_check(args):
 
 
 # ------------------------------------------------------------------ scan
+def _members():
+    """The ASCPT member directory, if one has been imported. Optional."""
+    path = config.members_file()
+    if not os.path.exists(path):
+        return {}
+    try:
+        return sheets.load_members(path)
+    except Exception as e:
+        _log(f"  WARNING: could not read {os.path.basename(path)} ({e})")
+        return {}
+
+
 def _gather(since, skip_pubmed=False, limit=None):
     _log(f"Scanning FDA approvals since {since} …")
     recs = sources.collect(since=since, novel_only=True)
     if limit:
         recs = recs[-limit:]
+    members = {} if skip_pubmed else _members()
+    if members:
+        _log(f"ASCPT member directory: {len(members)} people — matches will be flagged")
     _log(f"\n{len(recs)} novel agent(s) found. Enriching …")
     out = []
     for r in recs:
         if skip_pubmed:
             r = dict(r, prior_review=False, prior_review_detail="",
-                     candidate_authors=[], clinpharm_paper_count=0)
+                     candidate_authors=[], clinpharm_people=[],
+                     clinpharm_contacts="", clinpharm_evidence="",
+                     clinpharm_paper_count=0)
         else:
-            r = enrich.enrich(r)
+            r = enrich.enrich(r, members=members)
         out.append(classify.enrich_record(r, r.get("prior_review", False)))
     return out
 
@@ -210,6 +227,23 @@ def cmd_scan(args):
     return 0
 
 
+def _refresh_existing(args, qpath, dry):
+    """Fill in contacts for rows already in the queue.
+
+    `update` only ever appends, so rows added before the contact columns
+    existed would stay blank for ever without this.
+    """
+    if not getattr(args, "refresh", False) or not os.path.exists(qpath):
+        return
+    _log("\nRefreshing contacts for candidates already in the queue …")
+    if dry:
+        _log("[dry run] would look up contacts for existing rows")
+        return
+    n = sheets.refresh_queue_contacts(qpath, enrich.enrich, members=_members(),
+                                      only_missing=True, log=_log)
+    _log(f"  {n} row(s) refreshed")
+
+
 def cmd_update(args):
     """Append new candidates to the queue. Idempotent."""
     dry = not args.go
@@ -231,6 +265,7 @@ def cmd_update(args):
 
     if not fresh:
         _log("\nNothing to add.")
+        _refresh_existing(args, qpath, dry)
         return 0
 
     contacts = sheets.load_contacts()
@@ -262,7 +297,12 @@ def cmd_update(args):
 
 
 def cmd_dossier(args):
-    """Build the pre-ASCPT recruiting dossier."""
+    """Build the outreach list: who to contact at each drug's company.
+
+    The objective is reaching the clinical pharmacologist who worked on the
+    drug. The ASCPT programme and attendee list are two further ways of getting
+    to that person, not the purpose of the exercise.
+    """
     dry = not args.go
     year = _meeting_year(args.year)
 
@@ -312,19 +352,30 @@ def cmd_dossier(args):
     i_score, i_pres = col["Novelty"], col["ASCPT presence"]
     i_hist = col["Last year at ASCPT"]
 
+    i_contacts = col["Clin pharm contacts"]
     with_leads = sum(1 for r in rows if r[i_pres] != "none found")
     with_hist = sum(1 for r in rows if r[i_hist] != "not seen")
-    _log(f"\n{len(rows)} dossier row(s); {with_leads} present at AM{year}; "
+    with_people = sum(1 for r in rows if r[i_contacts].strip())
+    _log(f"\n{len(rows)} candidate(s); {with_people} with a named clinical "
+         f"pharmacologist at the company")
+    _log(f"  also: {with_leads} present at AM{year}, "
          f"{with_hist} whose sponsor has been to a previous meeting")
-    _log(f"\n{'rank':>4}  {'drug':26}  {'score':>5}  {'AM' + str(year):22}  previously")
+    _log(f"\n{'rank':>4}  {'drug':24}  {'who to contact':60}")
     _log("-" * 96)
     for r in rows[:20]:
-        _log(f"{r[i_rank]:>4}  {r[i_drug][:26]:26}  {r[i_score]:>5}  "
-             f"{r[i_pres][:22]:22}  {r[i_hist][:34]}")
+        who = r[i_contacts].split(" | ")[0] if r[i_contacts].strip() else "—"
+        _log(f"{r[i_rank]:>4}  {r[i_drug][:24]:24}  {who[:60]}")
     if len(rows) > 20:
         _log(f"  … {len(rows) - 20} more")
 
     path, name = sheets.write_dossier(year, rows, dry_run=dry)
+
+    # A short list of specific people to verify, not a copy of the directory.
+    known = _members()
+    check = sheets.membership_check_rows(live, known)
+    cpath = config.membership_check_path()
+    sheets.write_membership_check(cpath, check, dry_run=dry)
+
     if dry:
         kept = sheets.merge_annotations(rows, path)
         annotated = sum(1 for r in kept
@@ -337,6 +388,11 @@ def cmd_dossier(args):
         _log("\nNothing was written. Re-run with --go.")
     else:
         _log(f"\nDossier: {path}")
+        if check:
+            _log(f"Membership check list: {cpath}")
+            _log(f"  {len(check)} name(s) with no membership answer yet. Fill in the "
+                 f"'ASCPT member?' column\n  (or ask members@ascpt.org to), then import "
+                 f"it back with:  ./moa-engine roster --file \"{cpath}\" --go")
         _log("\nReview and edit it — reorder rows, fill in AE owner, drop what you "
              "don't want.\nThen write the letters with:  "
              f"./moa-engine invites --year {year} --go")
@@ -361,16 +417,23 @@ def cmd_roster(args):
              f"Open it in Excel and use File > Save As > Excel Workbook (.xlsx).")
         return 1
 
-    # Auto-detect: a programme has posters, a roster has people.
+    # Auto-detect. A programme has posters. A member directory and an attendee
+    # list are both just name + organisation, so the only thing separating them
+    # is a membership-specific column -- absent that, assume attendees.
     kind = args.kind
     if not kind:
         tabs = store.tab_names(src)
         head = store.xlsx_read(src, "Posters" if "Posters" in tabs else None)
         hdr = [h.strip().lower() for h in (head[0] if head else [])]
-        kind = "program" if any("poster" in h or "abstract" in h
-                                for h in hdr) else "attendees"
-    _log(f"Detected: {'ASCPT programme' if kind == 'program' else 'attendee list'}"
-         f"  (override with --kind)")
+        if any("poster" in h or "abstract" in h for h in hdr):
+            kind = "program"
+        elif sheets.looks_like_check_list(src) or sheets.looks_like_members(src):
+            kind = "members"
+        else:
+            kind = "attendees"
+    label = {"program": "ASCPT programme", "attendees": "attendee list",
+             "members": "ASCPT member directory"}[kind]
+    _log(f"Detected: {label}  (override with --kind)")
 
     if kind == "program":
         prog = sheets.load_program(src)
@@ -382,6 +445,26 @@ def cmd_roster(args):
         if not prog["has_authors"]:
             _log("  without a Presenting Author column you get companies, not people")
         dest = config.program_file(year)
+    elif kind == "members":
+        from_check = sheets.looks_like_check_list(src)
+        try:
+            members = (sheets.load_check_list(src) if from_check
+                       else sheets.load_members(src))
+        except sheets.RosterError as e:
+            _log(f"Cannot use this file: {e}")
+            return 1
+        if not members:
+            _log("No confirmed members found." if from_check else
+                 "No named people found — a directory needs a name column.")
+            return 1
+        dest = config.members_file()
+        if from_check:
+            _log(f"  filled-in check list: {len(members)} confirmed member(s)")
+            merged, added = sheets.merge_members(dest, members)
+            _log(f"  {added} new; {len(merged)} known in total after merging")
+            members = merged
+        else:
+            _log(f"  {len(members)} member(s) with a name")
     else:
         try:
             people = sheets.load_roster(src)
@@ -408,10 +491,19 @@ def cmd_roster(args):
         return 0
 
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    if os.path.abspath(src) != os.path.abspath(dest):
+    if kind == "members":
+        # Written, not copied: a check-list import is a merge with what is
+        # already on file, so the source file is not what should land here.
+        sheets.save_members(dest, members)
+    elif os.path.abspath(src) != os.path.abspath(dest):
         shutil.copyfile(src, dest)
     _log(f"\nSaved as {dest}")
-    _log(f"It will be used from the next dossier run for AM{year}.")
+    if kind == "members":
+        _log("Clinical pharmacologists found on PubMed will now be flagged when "
+             "they appear in this directory. Not year-specific — it applies to "
+             "every run until you replace it.")
+    else:
+        _log(f"It will be used from the next dossier run for AM{year}.")
     return 0
 
 
@@ -419,7 +511,7 @@ def cmd_invites(args):
     """Draft the invitation letters, from the dossier as it now stands."""
     dry = not args.go
     year = _meeting_year(args.year)
-    dpath = config.dossier_path(year)
+    dpath = config.dossier_path(year, existing=True)
 
     if not os.path.exists(dpath):
         _log(f"No dossier for {year} at {dpath}\n"
@@ -437,7 +529,7 @@ def cmd_invites(args):
         drug_i = columns.index("Drug (INN)")
         contact_i = columns.index("Contact")
     except ValueError:
-        _log("The dossier is missing a 'Drug (INN)' or 'Contact' column — "
+        _log("The outreach list is missing a 'Drug (INN)' or 'Contact' column — "
              "was its header edited?")
         return 1
 
@@ -480,6 +572,18 @@ def cmd_status(args):
 
 # ------------------------------------------------------------------ main
 def main(argv=None):
+    # Double-clicked with no arguments? Open the app rather than printing an
+    # argparse error. `moa-engine` looks launchable in Finder, and "the
+    # following arguments are required: cmd" is a useless thing to show someone
+    # who just wanted the tool to start.
+    if argv is None and len(sys.argv) == 1:
+        try:
+            import gui
+        except Exception:
+            pass
+        else:
+            return gui.main() or 0
+
     p = argparse.ArgumentParser(
         prog="moa-engine",
         description="Find novel drug approvals that need a CTS MOA mini-review.",
@@ -510,10 +614,13 @@ def main(argv=None):
     sp.add_argument("--since")
     sp.add_argument("--limit", type=int)
     sp.add_argument("--no-pubmed", action="store_true")
+    sp.add_argument("--refresh", action="store_true",
+                    help="also fill in contacts for candidates already in the queue")
     sp.add_argument("--go", action="store_true", help="actually write the file")
     sp.set_defaults(fn=cmd_update)
 
-    sp = out_flag(sub.add_parser("dossier", help="build the pre-ASCPT recruiting dossier"))
+    sp = out_flag(sub.add_parser("dossier",
+                       help="build the outreach list — who to contact at each company"))
     sp.add_argument("--year", type=int, help="meeting year (default: next meeting)")
     sp.add_argument("--window", type=int, default=550,
                     help="include approvals from the trailing N days (default 550)")
@@ -521,16 +628,17 @@ def main(argv=None):
     sp.set_defaults(fn=cmd_dossier)
 
     sp = sub.add_parser(
-        "roster", help="import an ASCPT attendee list or programme (optional)")
+        "roster",
+        help="import an ASCPT programme, attendee list or member directory (optional)")
     sp.add_argument("--file", required=True, help="the .xlsx you exported")
     sp.add_argument("--year", type=int, help="meeting year (default: next meeting)")
-    sp.add_argument("--kind", choices=("program", "attendees"),
+    sp.add_argument("--kind", choices=("program", "attendees", "members"),
                     help="override the auto-detected file type")
     sp.add_argument("--go", action="store_true", help="actually save it")
     sp.set_defaults(fn=cmd_roster)
 
     sp = out_flag(sub.add_parser(
-        "invites", help="draft the invitation letters from the dossier"))
+        "invites", help="draft the invitation letters from the outreach list"))
     sp.add_argument("--year", type=int, help="meeting year (default: next meeting)")
     sp.add_argument("--invites", type=int, default=15,
                     help="how many letters to draft (default 15)")

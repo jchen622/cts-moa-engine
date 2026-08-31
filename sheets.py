@@ -136,6 +136,8 @@ def queue_row(rec, contact):
         rec.get("gap", ""),
         str(rec.get("score", "")),
         (rec.get("prior_review_detail") or "yes") if rec.get("prior_review") else "no",
+        rec.get("clinpharm_contacts", ""),
+        rec.get("clinpharm_evidence", ""),
         ", ".join(rec.get("candidate_authors", [])[:6]),
         contact,
         "",                                   # AE owner - human fills
@@ -160,6 +162,43 @@ def append_candidates(path, rows, dry_run=True):
         existing = [config.QUEUE_COLUMNS]
     store.xlsx_write(path, {config.QUEUE_TAB: existing + [list(r) for r in rows]})
     return len(rows)
+
+
+def refresh_queue_contacts(path, enrich_fn, members=None, only_missing=True,
+                           log=print):
+    """Backfill the clinical-pharmacologist columns on an existing queue.
+
+    The queue predates these columns, and `update` only ever appends, so
+    without this the rows already in it would stay blank for ever. Human
+    columns are read and written back untouched; only machine columns change.
+    """
+    rows = store.xlsx_read(path, config.QUEUE_TAB)
+    if not rows:
+        return 0
+    hdr = list(rows[0])
+    # Widen an older workbook to the current layout, keeping values with their
+    # own headers rather than by position.
+    body = [{hdr[i]: (r[i] if i < len(r) else "") for i in range(len(hdr))}
+            for r in rows[1:] if r and r[0].strip()]
+    out, done = [], 0
+    for rec in body:
+        have = rec.get("Clin pharm contacts", "")
+        if not (only_missing and have):
+            drug = rec.get("Drug (INN)", "")
+            if drug:
+                got = enrich_fn({"ingredient": drug,
+                                 "sponsor_raw": rec.get("Sponsor", "")},
+                                members=members)
+                rec["Clin pharm contacts"] = got.get("clinpharm_contacts", "")
+                rec["Contact evidence (PMIDs)"] = got.get("clinpharm_evidence", "")
+                if got.get("candidate_authors"):
+                    rec["Candidate authors"] = ", ".join(
+                        got["candidate_authors"][:6])
+                done += 1
+                log(f"    {drug[:26]:26s} {rec['Clin pharm contacts'][:56]}")
+        out.append([rec.get(c, "") for c in config.QUEUE_COLUMNS])
+    store.xlsx_write(path, {config.QUEUE_TAB: [config.QUEUE_COLUMNS] + out})
+    return done
 
 
 def read_queue(path):
@@ -255,6 +294,105 @@ def _find_column(hdr, candidates):
         if any(want in h for want in candidates):
             return i
     return None
+
+
+def looks_like_members(path):
+    """Does this workbook carry a membership-only column?"""
+    try:
+        rows = store.xlsx_read(path)
+    except Exception:
+        return False
+    if not rows:
+        return False
+    hdr = [str(h).strip().lower() for h in rows[0]]
+    return any(any(m == h or m in h for m in config.MEMBER_ONLY_COLUMNS)
+               for h in hdr)
+
+
+def looks_like_check_list(path):
+    """Is this the engine's own membership check list, filled in?"""
+    try:
+        rows = store.xlsx_read(path)
+    except Exception:
+        return False
+    if not rows:
+        return False
+    hdr = [str(h).strip().lower() for h in rows[0]]
+    return "ascpt member?" in hdr and "name" in hdr
+
+
+def load_check_list(path):
+    """Read a filled-in membership check list into {person key -> organisation}.
+
+    Only rows answered affirmatively count. A blank answer means "not checked
+    yet", which is different from "not a member", so both are skipped rather
+    than being recorded as a negative.
+    """
+    import authors
+    rows = store.xlsx_read(path)
+    if not rows:
+        return {}
+    hdr = [str(h).strip().lower() for h in rows[0]]
+    try:
+        i_name = hdr.index("name")
+        i_ans = hdr.index("ascpt member?")
+    except ValueError:
+        return {}
+    i_org = hdr.index("company") if "company" in hdr else None
+    out = {}
+    for r in rows[1:]:
+        def cell(i):
+            return r[i].strip() if i is not None and i < len(r) else ""
+        ans = cell(i_ans).lower()
+        if ans[:1] in ("y", "t", "1") or ans == "member":
+            name = cell(i_name)
+            if name:
+                out[authors.person_key(name)] = cell(i_org)
+    return out
+
+
+MEMBERS_COLUMNS = ["Name", "Company"]
+
+
+def save_members(path, members):
+    """Write {person key -> org} as a plain two-column directory file."""
+    rows = [[name, org] for name, org in sorted(members.items())]
+    store.xlsx_write(path, {"Members": [MEMBERS_COLUMNS] + rows})
+    return len(rows)
+
+
+def merge_members(existing_path, new):
+    """Existing confirmed members plus newly confirmed ones.
+
+    A check list only carries the names that had no answer yet, so importing
+    one must add to what is already known rather than replace it -- otherwise
+    every round of checking would discard the previous round's answers.
+    """
+    current = {}
+    if existing_path and os.path.exists(existing_path):
+        try:
+            current = load_members(existing_path)
+        except Exception:
+            current = {}
+    merged = dict(current)
+    merged.update(new)
+    return merged, len(merged) - len(current)
+
+
+def load_members(path, tab=None):
+    """Read an ASCPT member directory into {person key -> organisation}.
+
+    Same {name, org} shape as an attendee list, so it reuses load_roster; the
+    difference is what it is used for. Keyed on first-initial + surname to
+    survive middle initials, matching authors.person_key.
+    """
+    import authors                       # local: authors imports sheets
+    out = {}
+    for p in load_roster(path, tab):
+        if not p.get("name"):
+            continue
+        out[authors.person_key(p["name"])] = p.get("org", "")
+    return out
 
 
 def load_roster(path, tab=None):
@@ -509,6 +647,8 @@ def dossier_rows(candidates, program, attendance=None):
             bits.append(f"{on_roster} on roster")
         presence = ", ".join(bits) or "none found"
         detail = " | ".join(_hit_detail(k, r, w) for k, r, w in hits[:3])
+        # Cell order must track config.DOSSIER_COLUMNS exactly: who to contact
+        # first, then the meeting as one further way of reaching them.
         rows.append([
             str(i),
             rec.get("Drug (INN)") or rec.get("ingredient", ""),
@@ -519,11 +659,13 @@ def dossier_rows(candidates, program, attendance=None):
             rec.get("Gap flag") or rec.get("gap", ""),
             str(_score_of(rec)),
             rec.get("Prior review?") or ("yes" if rec.get("prior_review") else "no"),
+            rec.get("Clin pharm contacts") or rec.get("clinpharm_contacts", ""),
+            rec.get("Contact evidence (PMIDs)") or rec.get("clinpharm_evidence", ""),
+            rec.get("Contact", ""),
             presence,
             detail,
             last_year,
             " | ".join(who[:4]),
-            rec.get("Contact", ""),
             rec.get("Candidate authors") or ", ".join(rec.get("candidate_authors", [])),
             rec.get("AE owner", ""),
             "",                                # Attending?  - human fills at the meeting
@@ -607,10 +749,49 @@ def read_dossier(year):
     Read back rather than recomputed, so edits made in the workbook -- a
     reordering, a deleted row, an AE owner filled in -- carry into the drafts.
     """
-    rows = store.xlsx_read(config.dossier_path(year), DOSSIER_TAB)
+    rows = store.xlsx_read(config.dossier_path(year, existing=True), DOSSIER_TAB)
     if len(rows) < 2:
         return [], []
     return rows[0], [r for r in rows[1:] if any(c.strip() for c in r)]
+
+
+def membership_check_rows(candidates, members=None):
+    """One row per distinct person the engine surfaced, for manual verification.
+
+    Only people we would actually contact, de-duplicated across drugs, with
+    anyone already known to be a member left out -- so the list shrinks each
+    time an answer comes back rather than asking the same question twice.
+    """
+    import authors
+    members = members or {}
+    seen, rows = {}, []
+    for rec in candidates:
+        drug = rec.get("Drug (INN)") or rec.get("ingredient", "")
+        for p in rec.get("clinpharm_people", []) or []:
+            key = authors.person_key(p["name"])
+            if key in members:
+                continue
+            if key in seen:
+                if drug and drug not in seen[key]:
+                    seen[key].append(drug)
+                continue
+            seen[key] = [drug] if drug else []
+            rows.append([p["name"], p.get("org", ""), "", key])
+    by_key = {r[3]: r for r in rows}
+    for key, drugs in seen.items():
+        if key in by_key:
+            by_key[key][3] = ", ".join(drugs[:4])
+    return rows
+
+
+MEMBERSHIP_CHECK_COLUMNS = ["Name", "Company", "ASCPT member?", "Found for (drug)"]
+
+
+def write_membership_check(path, rows, dry_run=True):
+    if dry_run or not rows:
+        return len(rows)
+    store.xlsx_write(path, {"Check": [MEMBERSHIP_CHECK_COLUMNS] + rows})
+    return len(rows)
 
 
 # ------------------------------------------------------------------ invites

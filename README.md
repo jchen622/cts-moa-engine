@@ -1,10 +1,12 @@
 # CTS MOA sourcing engine
 
 Finds newly approved **novel** drugs that deserve a *Mechanism of Action* mini-review in
-*Clinical and Translational Science*, keeps them in a queue that fills itself, and once a
-year builds a **recruiting dossier** timed to the ASCPT Annual Meeting — so you arrive
-knowing which drugs need authors and **which named people will be standing at which
-poster**.
+*Clinical and Translational Science*, and identifies **the clinical pharmacologist at the
+company who worked on each one** — by name, from their published Phase 1 clinical
+pharmacology studies, with the evidence attached.
+
+The objective is reaching that person. The ASCPT programme and attendee list are two further
+routes to them, not the point of the tool.
 
 Everything is a local file. Nothing runs unless you run it, nothing is written without
 `--go`, and **no email is ever sent**.
@@ -30,7 +32,8 @@ cd "~/Desktop/Desktop/05 Code and Tools/cts-moa-engine"
 On Windows, double-click **`Start MOA engine.bat`** and use `moa-engine.bat` in place of
 `./moa-engine` below. See §12.
 
-Requirements: **Python 3**. Nothing else — no pip installs, no accounts, no credentials, no
+Requirements: **Python 3** and nothing else — no Claude or other AI tool, no account,
+no API key, no login. Standard library only. **Python 3**. Nothing else — no pip installs, no accounts, no credentials, no
 network access beyond the FDA and PubMed feeds the filter needs.
 
 ---
@@ -43,7 +46,7 @@ network access beyond the FDA and PubMed feeds the filter needs.
 | `check` | Verifies input files, output folder, FDA sources, PubMed, schedule | no |
 | `scan` | Prints ranked candidates for a look-back window | no |
 | `update` | Appends **new** candidates to the queue | only with `--go` |
-| `dossier` | Builds the ASCPT recruiting dossier | only with `--go` |
+| `dossier` | Builds the outreach list | only with `--go` |
 | `roster` | Imports an ASCPT attendee list or programme export | only with `--go` |
 | `invites` | Drafts the invitation letters **from the dossier** | only with `--go` |
 | `start` / `stop` / `status` | The optional monthly schedule | plist |

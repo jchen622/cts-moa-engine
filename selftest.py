@@ -16,6 +16,7 @@ import os
 import shutil
 import sys
 import tempfile
+import xml.sax.saxutils
 import zipfile
 
 import config
@@ -469,6 +470,119 @@ def test_wider_dossier_merge(tmp):
           ["", ""])
 
 
+# ------------------------------------------------- clinical-pharmacologist ID
+def _article(pmid, journal, authors_):
+    """Minimal efetch-shaped XML. authors_ is [(fore, last, affiliation)].
+
+    Everything is escaped: real journal titles contain ampersands
+    ("Diabetes, obesity & metabolism"), and an unescaped one makes the whole
+    document unparseable.
+    """
+    esc = xml.sax.saxutils.escape
+    people = "".join(
+        f"<Author><LastName>{esc(l)}</LastName><ForeName>{esc(f)}</ForeName>"
+        f"<AffiliationInfo><Affiliation>{esc(a)}</Affiliation></AffiliationInfo>"
+        f"</Author>" for f, l, a in authors_)
+    return (f"<PubmedArticle><MedlineCitation><PMID>{pmid}</PMID><Article>"
+            f"<Journal><Title>{esc(journal)}</Title></Journal>"
+            f"<AuthorList>{people}</AuthorList></Article>"
+            f"</MedlineCitation></PubmedArticle>")
+
+
+def _wrap(*arts):
+    return ("<PubmedArticleSet>" + "".join(arts) + "</PubmedArticleSet>").encode()
+
+
+LILLY = "Eli Lilly and Company, Indianapolis, Indiana, USA."
+SPERO = "Spero Therapeutics, Inc., Cambridge, Massachusetts, USA."
+MDA = "Department of Leukemia, The University of Texas MD Anderson Cancer Center."
+ABBVIE = "AbbVie, Inc, North Chicago, IL."
+
+
+def test_clinpharm_tier1():
+    """Sponsor-affiliated first author on a clin pharm study ranks top."""
+    import authors
+    section("Tier 1 — a clinical pharmacology study, sponsor at the front")
+    xml = _wrap(_article("41994902", "Diabetes, obesity & metabolism", [
+        ("Xiaosu", "Ma", LILLY), ("Ying Grace", "Li", LILLY),
+        ("Sohini", "Raha", LILLY), ("Shobha", "Bhattachar", LILLY)]))
+    arts = authors.parse_articles(xml)
+    for a in arts:
+        a["tier"] = 1
+    ranked = authors.rank(arts, "ELI LILLY AND CO")
+    check("six-author Lilly paper parses", len(arts[0]["authors"]), 4)
+    check("Xiaosu Ma ranks first", ranked[0]["name"], "Xiaosu Ma")
+    check("recognised as at the sponsor", ranked[0]["sponsor"], True)
+    check("org is the company, not the city", ranked[0]["org"],
+          "Eli Lilly and Company")
+
+
+def test_clinpharm_acquisition_and_drift():
+    """FDA sponsor differs from who ran the programme; people move."""
+    import authors
+    section("Tier 1 — an acquisition, and an author who has since moved")
+    xml = _wrap(
+        _article("38432233", "Antimicrobial agents and chemotherapy", [
+            ("Vipul K", "Gupta", SPERO),
+            ("Amanda", "Ek", "Takeda Pharmaceuticals, Cambridge, MA, USA."),
+            ("Angela", "Talley", SPERO)]),
+        _article("35762796", "Clinical pharmacology in drug development", [
+            ("Vipul K", "Gupta", SPERO), ("Angela K", "Talley", SPERO)]))
+    arts = authors.parse_articles(xml)
+    for a in arts:
+        a["tier"] = 1
+    # tebipenem is approved to GSK; every paper is authored out of Spero
+    ranked = authors.rank(arts, "GLAXOSMITHKLINE")
+    names = [p["name"] for p in ranked]
+    check("programme org inferred as Spero", authors.programme_org(arts),
+          "Spero Therapeutics")
+    check("Gupta found despite the sponsor mismatch", names[0], "Vipul K Gupta")
+    check("credited to the programme, not the FDA sponsor",
+          ranked[0]["programme"], True)
+    check("middle initial does not split Angela Talley",
+          sum(1 for n in names if "Talley" in n), 1)
+
+
+def test_clinpharm_dose_escalation():
+    """The hard case: 24 authors, the clin pharm group buried at 20-22."""
+    import authors
+    section("Tier 3 — dose escalation, where author position is noise")
+    people = ([("Naveen", "Pemmaraju", MDA)]
+              + [("A", f"Investigator{i}",
+                  f"University Hospital {i}, City, Country.") for i in range(18)]
+              + [("Yining", "Du", ABBVIE),
+                 ("Sribalaji", "Lakshmikanthan", ABBVIE),
+                 ("Jalaja", "Potluri", ABBVIE),
+                 ("Naval G", "Daver", MDA)])
+    xml = _wrap(_article("38776914", "Journal of clinical oncology", people))
+    arts = authors.parse_articles(xml)
+    for a in arts:
+        a["tier"] = 3
+    ranked = authors.rank(arts, "ABBVIE INC")
+    names = {p["name"] for p in ranked}
+    check("all three AbbVie authors surface",
+          {"Yining Du", "Sribalaji Lakshmikanthan", "Jalaja Potluri"} <= names, True)
+    check("the MD Anderson first author is not returned",
+          "Naveen Pemmaraju" in names, False)
+    check("the MD Anderson last author is not returned",
+          "Naval G Daver" in names, False)
+    check("no site investigators returned",
+          any("Investigator" in n for n in names), False)
+
+
+def test_sponsor_affiliation_matching():
+    import authors
+    section("Sponsor matching against real affiliation strings")
+    check("Lilly matches its own affiliation",
+          authors._is_sponsor(LILLY, "ELI LILLY AND CO"), True)
+    check("AbbVie matches", authors._is_sponsor(ABBVIE, "ABBVIE INC"), True)
+    check("Vera does not match Verastem",
+          authors._is_sponsor("Verastem Oncology, Needham, MA, USA.",
+                              "VERA THERAPEUTICS INC."), False)
+    check("MD Anderson is not a sponsor match",
+          authors._is_sponsor(MDA, "ABBVIE INC"), False)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="moa-selftest-")
     print(f"Self-test — local file layer. Scratch dir: {tmp}")
@@ -488,6 +602,10 @@ def main():
         test_year_rollover()
         test_history_accumulates(tmp)
         test_wider_dossier_merge(tmp)
+        test_clinpharm_tier1()
+        test_clinpharm_acquisition_and_drift()
+        test_clinpharm_dose_escalation()
+        test_sponsor_affiliation_matching()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -99,6 +99,11 @@ def _argv_for(action, upload_path=None):
     return argv
 
 
+# How to invoke the engine as a subprocess. The single-file build has no
+# moa_engine.py on disk, so it overrides this to re-invoke the bundle itself.
+ENGINE_ARGV = [sys.executable, "-u", os.path.join(HERE, "moa_engine.py")]
+
+
 class Job:
     """One running subprocess and the lines it has printed so far."""
 
@@ -121,7 +126,7 @@ class Job:
             self.exit = None
             self.label = label
             self.proc = subprocess.Popen(
-                [sys.executable, "-u", os.path.join(HERE, "moa_engine.py")] + argv,
+                list(ENGINE_ARGV) + argv,
                 cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, bufsize=1, **_NO_WINDOW)
         threading.Thread(target=self._pump, daemon=True).start()
@@ -260,8 +265,10 @@ mini&#8209;review. Work down the list.</p>
 </div><button data-a="update">Update</button></div>
 
 <div class="step"><div class="num">4</div><div class="body">
- <div class="title">Build the dossier for the <span class="yr">next</span> meeting</div>
- <div class="desc">Ranks your candidates and works out who to approach about each one.
+ <div class="title">Build the outreach list</div>
+ <div class="desc">Ranks your candidates and, for each one, names the <b>clinical
+ pharmacologists at the company who actually worked on that drug</b> &mdash; found from
+ their Phase 1 clinical pharmacology papers, with the evidence attached.
  Any notes you have already typed in are kept.</div>
  <div class="desc" id="whopulled" style="margin-top:8px"></div>
  <div class="tag w">Saves to your results folder</div>
@@ -269,20 +276,26 @@ mini&#8209;review. Work down the list.</p>
 
 <div class="step"><div class="num">5</div><div class="body">
  <div class="title">Write the invitation letters</div>
- <div class="desc">Drafts one letter per candidate, from the dossier exactly as you last edited it.
+ <div class="desc">Drafts one letter per candidate, addressed to the clinical
+ pharmacologist at the top of the list, from the outreach list exactly as you last edited it.
  Do step 4 first, then read it over and reorder or delete rows before coming here.</div>
  <div class="tag w">Saves to your results folder &middot; <b>no email is ever sent</b></div>
 </div><button data-a="invites">Write letters</button></div>
 
 <div class="step"><div class="num">+</div><div class="body">
- <div class="title">Add the attendee list for <span class="yr">the next meeting</span>
+ <div class="title">Add a file that helps you reach people
  <span style="font-weight:400;color:var(--dim)">&mdash; optional</span></div>
- <div class="desc">This is for the <b><span class="yr">upcoming</span></b> meeting &mdash; the one you
- are preparing for. With it, step 4 can say which sponsors are actually
- <b>registered to attend</b>, by name, instead of inferring it from who came before.</div>
+ <div class="desc">The goal is getting to the right clinical pharmacologist. Step&nbsp;4
+ already finds them from the published literature; these just add more ways to reach
+ them. Drop in any of the following and the tool works out which it is:</div>
+ <div class="desc" style="margin-top:8px">
+ &bull; an <b>ASCPT member directory</b> export &mdash; flags which of them are members<br>
+ &bull; the <b>membership check list</b> the tool writes, once you have filled it in<br>
+ &bull; an <b>attendee list</b> for the <span class="yr">upcoming</span> meeting &mdash;
+ says who is registered, by name<br>
+ &bull; the <b>programme export</b> &mdash; adds poster numbers and times</div>
  <div class="desc" id="haveatt" style="margin-top:8px"></div>
- <div class="tag">A .xlsx with a name column and an organisation column &middot;
- the <span class="yr">upcoming</span> programme export works here too</div>
+ <div class="tag">A .xlsx with a name column and an organisation column</div>
 </div><button class="safe" data-a="roster">Choose file&hellip;</button></div>
 <input type="file" id="rosterfile" accept=".xlsx" style="display:none">
 

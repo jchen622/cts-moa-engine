@@ -14,6 +14,7 @@ import time
 import urllib.parse
 import urllib.request
 
+import authors as authors_mod
 import config
 
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
@@ -76,51 +77,78 @@ def has_moa_review(drug):
     return False, ""
 
 
-def sponsor_authors(drug, retmax=12):
-    """Clinical-pharmacology authors already publishing on this drug.
+def _efetch_xml(pmids, retries=3):
+    """Raw efetch XML. esummary carries no affiliations, so it cannot be used."""
+    if not pmids:
+        return b""
+    params = {"db": "pubmed", "id": ",".join(pmids), "retmode": "xml",
+              "tool": TOOL}
+    if EMAIL:
+        params["email"] = EMAIL
+    url = f"{EUTILS}/efetch.fcgi?{urllib.parse.urlencode(params)}"
+    for attempt in range(retries):
+        _throttle()
+        try:
+            with urllib.request.urlopen(url, timeout=45) as r:
+                return r.read()
+        except Exception as e:
+            if attempt == retries - 1:
+                print(f"  PubMed efetch error ({e})", file=sys.stderr)
+                return b""
+            time.sleep(1.5 * (attempt + 1))
+    return b""
 
-    These are the people most likely to accept an invitation -- typically the
-    sponsor's own clin pharm group, which is who has written most of the
-    existing MOA mini-reviews.
+
+def clinpharm_papers(drug, per_tier=8):
+    """Papers about this drug, tagged with which evidence tier found them.
+
+    Tiers are searched in order and the results merged: a person appearing in
+    more than one tier is a stronger candidate, so nothing is discarded once a
+    higher tier hits.
     """
     d = re.sub(r'["\\]', " ", drug).strip()
     if not d:
         return [], 0
-    ids, n = _esearch(
-        f'"{d}"[Title/Abstract] AND (pharmacokinetics[Title/Abstract] OR '
-        f'"clinical pharmacology"[Title/Abstract] OR '
-        f'"exposure-response"[Title/Abstract] OR pharmacodynamics[Title/Abstract])',
-        retmax=retmax)
-    if not ids:
+    found, total = {}, 0
+    for tier, _label, query in authors_mod.TIERS:
+        ids, n = _esearch(f'"{d}"[Title/Abstract] AND {query}', retmax=per_tier)
+        total += n
+        for pmid in ids:
+            found.setdefault(pmid, tier)      # keep the strongest (lowest) tier
+    if not found:
         return [], 0
-    d2 = _get("esummary.fcgi", {"db": "pubmed", "id": ",".join(ids)})
-    result = d2.get("result", {})
-    seen, authors = set(), []
-    for pmid in ids:
-        rec = result.get(pmid) or {}
-        for a in (rec.get("authors") or []):
-            nm = a.get("name", "").strip()
-            if nm and nm.lower() not in seen:
-                seen.add(nm.lower())
-                authors.append(nm)
-    # last authors tend to be the senior clin pharm contact; keep order but cap
-    return authors[:8], n
+    arts = authors_mod.parse_articles(_efetch_xml(list(found)))
+    for a in arts:
+        a["tier"] = found.get(a["pmid"], 3)
+    return arts, total
 
 
-def enrich(rec, verbose=False):
+def sponsor_authors(drug, sponsor="", members=None):
+    """Ranked clinical pharmacologists for this drug, with their evidence."""
+    arts, total = clinpharm_papers(drug)
+    if not arts:
+        return [], 0
+    return authors_mod.rank(arts, sponsor, members=members), total
+
+
+def enrich(rec, verbose=False, members=None):
     """Attach PubMed findings to one candidate record."""
     drug = rec.get("ingredient") or rec.get("ingredient_raw") or ""
+    sponsor = rec.get("sponsor_raw") or rec.get("Sponsor") or ""
     prior, detail = has_moa_review(drug)
-    authors, npapers = sponsor_authors(drug)
+    people, npapers = sponsor_authors(drug, sponsor, members=members)
     if verbose:
-        print(f"    {drug[:28]:28s} prior_review={prior!s:5s} "
-              f"clinpharm_papers={npapers:3d} authors={len(authors)}",
-              file=sys.stderr)
+        top = people[0]["name"] if people else "-"
+        print(f"    {drug[:26]:26s} prior={prior!s:5s} papers={npapers:4d} "
+              f"people={len(people):2d} top={top}", file=sys.stderr)
     out = dict(rec)
     out.update({
         "prior_review": prior,
         "prior_review_detail": detail,
-        "candidate_authors": authors,
+        "clinpharm_people": people,
+        "candidate_authors": [p["name"] for p in people],
+        "clinpharm_contacts": authors_mod.format_contacts(people),
+        "clinpharm_evidence": authors_mod.format_evidence(people),
         "clinpharm_paper_count": npapers,
     })
     return out

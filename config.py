@@ -100,6 +100,22 @@ def attendees_file(year):
     return os.path.join(input_dir(), ATTENDEES_PATTERN.format(year=year))
 
 
+# Membership is standing, not tied to a meeting, so this file is NOT year-keyed.
+MEMBERS_FILE = "ascpt members.xlsx"
+
+
+def members_file():
+    return os.path.join(input_dir(), MEMBERS_FILE)
+
+
+# Headers that only a membership export carries. Used to tell a member
+# directory apart from an attendee list -- both are just name + organisation,
+# so without one of these the file is treated as an attendee list.
+MEMBER_ONLY_COLUMNS = ("member since", "membership type", "member id",
+                       "member type", "membership status", "join date",
+                       "member number", "community", "communities")
+
+
 def ncbi_email():
     """Contact address sent to NCBI E-utilities, if the user supplies one.
 
@@ -152,11 +168,42 @@ def queue_path():
 
 
 def dossier_name(year):
-    return f"ASCPT {year} MOA recruiting dossier"
+    """The objective is reaching company clinical pharmacologists.
+
+    This used to be called "ASCPT {year} MOA recruiting dossier", which framed
+    the whole tool around one annual meeting. The meeting is one channel for
+    reaching the right person, not the point of the exercise, so the file is
+    named for the job it does. The year stays because the ASCPT columns in it
+    are year-specific and the list is naturally refreshed each cycle.
+    """
+    return f"MOA author outreach list {year}"
 
 
-def dossier_path(year):
-    return os.path.join(output_dir(), f"{dossier_name(year)}.xlsx")
+def legacy_dossier_path(year):
+    """Where the file used to live, so existing annotations are not orphaned."""
+    return os.path.join(output_dir(), f"ASCPT {year} MOA recruiting dossier.xlsx")
+
+
+def dossier_path(year, existing=False):
+    """Current path. With existing=True, fall back to the old name if that is
+    the only one on disk -- a rename must not silently discard someone's notes.
+    """
+    new = os.path.join(output_dir(), f"{dossier_name(year)}.xlsx")
+    if existing and not os.path.exists(new):
+        old = legacy_dossier_path(year)
+        if os.path.exists(old):
+            return old
+    return new
+
+
+def membership_check_path():
+    """Names the engine wants a membership answer for.
+
+    Deliberately a short list of specific people rather than a copy of the
+    directory: checking thirty names you are already corresponding with is
+    ordinary member behaviour, bulk-harvesting the directory is not.
+    """
+    return os.path.join(output_dir(), "membership check list.xlsx")
 
 
 def invites_path(year):
@@ -187,7 +234,8 @@ QUEUE_TAB = "Queue"
 
 QUEUE_COLUMNS = [
     "Key", "Approval date", "Drug (INN)", "Brand", "Sponsor", "Center",
-    "Modality", "Gap flag", "Novelty", "Prior review?", "Candidate authors",
+    "Modality", "Gap flag", "Novelty", "Prior review?",
+    "Clin pharm contacts", "Contact evidence (PMIDs)", "Candidate authors",
     "Contact", "AE owner", "Status", "First seen",
 ]
 
@@ -198,11 +246,16 @@ QUEUE_COLUMNS = [
 # that people who came last year tend to come again. Keeping them in separate
 # columns is the point: they used to be merged, so a 2027 dossier offered poster
 # times from March 2026 as somewhere to walk to.
+# Order follows the objective: who to write to comes before how else you might
+# bump into them. The ASCPT columns are one route among several, so they sit
+# after the contacts rather than leading.
 DOSSIER_COLUMNS = [
     "Rank", "Drug (INN)", "Brand", "Sponsor", "Approval date", "Modality",
-    "Gap flag", "Novelty", "Prior review?", "ASCPT presence", "Poster / session detail",
+    "Gap flag", "Novelty", "Prior review?",
+    "Clin pharm contacts", "Contact evidence (PMIDs)", "Contact",
+    "ASCPT presence", "Poster / session detail",
     "Last year at ASCPT", "Who to find",
-    "Contact", "Candidate authors", "AE owner", "Attending?", "Comments",
+    "Candidate authors", "AE owner", "Attending?", "Comments",
 ]
 
 # ---------------------------------------------------------------- editorial state
