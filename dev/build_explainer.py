@@ -691,10 +691,13 @@ def s9(prs):
 
     rx = M + Inches(7.7)
     rw = CW - Inches(7.7)
-    panel(s, rx, Inches(1.42), rw, Inches(2.55), fill=WHITE, line=GREEN)
+    panel(s, rx, Inches(1.42), rw, Inches(2.90), fill=WHITE, line=GREEN)
     tf = tb(s, rx + Inches(0.2), Inches(1.58), rw - Inches(0.4), Inches(2.25))
     para(tf, "THE SAFETY RAILS", size=9.5, bold=True, color=GREEN, first=True, after=8)
-    for t, d in [("Dry run by default",
+    for t, d in [("Runs on its own",
+                  "no AI, no Claude, no account, no API key, no server — "
+                  "Python 3 and a connection to the FDA and PubMed, nothing else"),
+                 ("Dry run by default",
                   "nothing is written without --go"),
                  ("No email, ever",
                   "invitations are drafted for you to send"),
@@ -704,23 +707,21 @@ def s9(prs):
                   "a weak name match reports NEEDS LOOKUP")]:
         p = tf.add_paragraph(); p.space_after = Pt(7); p.line_spacing = 1.08
         r = p.add_run(); r.text = "✓  " + t + " — "
-        r.font.name, r.font.size, r.font.bold = FONT, Pt(10.5), True
+        r.font.name, r.font.size, r.font.bold = FONT, Pt(9.5), True
         r.font.color.rgb = INK
         r2 = p.add_run(); r2.text = d
-        r2.font.name, r2.font.size = FONT, Pt(10.5); r2.font.color.rgb = INK_SOFT
+        r2.font.name, r2.font.size = FONT, Pt(9.5); r2.font.color.rgb = INK_SOFT
 
-    panel(s, rx, Inches(4.12), rw, Inches(2.5), fill=BOX_FILL, line=BOX_LINE, rounded=True)
-    tf = tb(s, rx + Inches(0.2), Inches(4.28), rw - Inches(0.4), Inches(2.2))
+    panel(s, rx, Inches(4.46), rw, Inches(2.16), fill=BOX_FILL, line=BOX_LINE, rounded=True)
+    tf = tb(s, rx + Inches(0.2), Inches(4.60), rw - Inches(0.4), Inches(1.90))
     para(tf, "HANDING IT TO SOMEONE ELSE — ONE FILE", size=9.5, bold=True,
          color=ACCENT, first=True, after=8)
-    para(tf, "Send one file, ~93 KB. Nothing to unzip, and it is both the app and "
-             "the command line.",
+    para(tf, "Send one file, ~93 KB. Both the app and the command line.",
          size=10.5, color=INK, after=6, line=1.15)
     para(tf, "SEND THIS/CTS MOA Engine.command     Mac\n"
              "SEND THIS/CTS MOA Engine.bat             Windows",
          size=10, bold=True, color=ACCENT, after=6, line=1.25)
-    para(tf, "Compressed inside and loaded from memory. First run creates a working "
-             "folder beside it for input and results.",
+    para(tf, "Loaded from memory; first run creates a working folder beside it.",
          size=10, color=INK_SOFT, after=6, line=1.12)
     para(tf, "No account, no credential, no API key, no server. The only requirement "
              "is Python 3.",
@@ -749,7 +750,9 @@ def s10(prs):
          "— someone who never published on the drug is invisible, and 3 of 27 "
          "candidates are too new to have any papers at all"),
         ("Affiliations are as at publication ",
-         "— people move; the tool flags it but cannot confirm where they are now"),
+         "— people move. The tool flags a likely move but cannot confirm a current "
+         "employer. LinkedIn is not an option: its terms prohibit automated access "
+         "and it refuses non-browser requests outright, so this stays a manual check"),
         ("The ASCPT member directory is behind a login ",
          "— it is never scraped. The tool writes a short check list of the specific "
          "names it wants an answer for, which you or ASCPT fill in"),
