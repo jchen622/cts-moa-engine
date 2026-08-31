@@ -36,24 +36,24 @@ itself down a few seconds later. There is also a **Quit** button on the page.
 
 ## What you need installed
 
-Just one thing: **Python 3**, from https://www.python.org/downloads/
+**Python 3** — and the tool will walk you through it.
 
-Nothing else. No Claude, no AI tool, no account, no API key, no login — the engine is
-an ordinary Python program. It talks to two public sources only: the FDA (Drugs@FDA and
-the Purple Book) and PubMed.
+If Python is missing, double-clicking the file opens the download page in your browser and
+tells you what to do. Download it, run the installer, click through, double-click the file
+again. About two minutes, and only ever once per computer.
 
-> **Mac note.** Every Mac already has a `python3` command, but on a machine without
+> **On Windows**, tick **"Add Python to PATH"** on the first screen of the installer. It is
+> easy to miss and nothing works without it.
+
+Nothing else. No Claude, no AI tool, no account, no API key, no login — the engine is an
+ordinary Python program. It talks to two public sources only: the FDA (Drugs@FDA and the
+Purple Book) and PubMed.
+
+> **Mac note.** Every Mac already has a `python3` command, but on a machine without working
 > developer tools it is a placeholder that prints Xcode errors instead of running. The
-> launcher tests each Python it finds and skips that one, so if it says Python is
-> missing, it really is — install it from the link above.
+> launcher tests each Python it finds and skips that one, so if it says Python is missing,
+> it really is.
 
-On Windows, tick **"Add Python to PATH"** on the first screen of the installer. It is easy to
-miss and nothing works without it.
-
-That's it. There is no account to create, no password, no sign-in, and nothing that talks to
-Google. Everything stays on this computer.
-
----
 
 ## The five buttons
 

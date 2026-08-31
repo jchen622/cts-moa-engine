@@ -123,14 +123,18 @@ main()
 '''
 
 MAC_HEADER = """#!/bin/sh
-"exec" "/bin/sh" "-c" 'for c in python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /Library/Frameworks/Python.framework/Versions/Current/bin/python3 python; do command -v "$c" >/dev/null 2>&1 && "$c" -c pass >/dev/null 2>&1 && exec "$c" "$0" "$@"; done; printf "\\n  Python 3 is required, and none that works was found.\\n\\n  Install it from https://www.python.org/downloads/\\n  then double-click this file again.\\n\\n  Press Return to close. "; read -r _; exit 1' "$0" "$@"
+"exec" "/bin/sh" "-c" 'for c in python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /Library/Frameworks/Python.framework/Versions/Current/bin/python3 python; do command -v "$c" >/dev/null 2>&1 && "$c" -c pass >/dev/null 2>&1 && exec "$c" "$0" "$@"; done; printf "\\n  This tool needs Python, which is not on this Mac yet.\\n\\n  A download page is opening in your browser now.\\n  Download the big yellow button, open the installer, click through it,\\n  then double-click this file again. It takes about two minutes and you\\n  only ever do it once.\\n\\n  If the page did not open:  https://www.python.org/downloads/\\n\\n  Press Return to close this window. "; open "https://www.python.org/downloads/" >/dev/null 2>&1; read -r _; exit 1' "$0" "$@"
 # sh runs the line above and replaces itself with Python running this same file.
 # Python reads it as a string expression and does nothing with it -- which is
 # what lets one file be both double-clickable and importable.
 #
 # Each candidate is TESTED, not just located. Every Mac ships /usr/bin/python3,
-# but on a machine without developer tools it is a stub that prints a wall of
-# Xcode errors instead of running. `-c pass` weeds it out.
+# but on a machine without working developer tools it is a stub that prints a
+# wall of Xcode errors instead of running. `-c pass` weeds it out.
+#
+# When nothing works we open the download page rather than only naming it: the
+# recipient is a journal editor, not a developer, and a URL printed in a
+# terminal is something they have to retype.
 """
 
 # The batch header MUST be exactly one line: `python -x` skips the first line
@@ -144,10 +148,13 @@ MAC_HEADER = """#!/bin/sh
 WIN_HEADER = (
     '@echo off & py -3 -c "pass" >nul 2>&1 && (py -3 -x "%~f0" %* & exit /b)'
     ' & python -c "pass" >nul 2>&1 && (python -x "%~f0" %* & exit /b)'
-    ' & echo. & echo   Python 3 is required, and none that works was found.'
-    ' & echo   Install it from https://www.python.org/downloads/'
-    ' & echo   Tick "Add Python to PATH" on the first screen of the installer.'
-    ' & echo. & pause\r\n')
+    ' & echo. & echo   This tool needs Python, which is not on this PC yet.'
+    ' & echo. & echo   A download page is opening in your browser now.'
+    ' & echo   Run the installer and TICK "Add Python to PATH" on the first screen,'
+    ' & echo   then double-click this file again. About two minutes, once only.'
+    ' & echo. & echo   If the page did not open: https://www.python.org/downloads/'
+    ' & echo. & start "" "https://www.python.org/downloads/"'
+    ' & pause\r\n')
 
 WIN_NOTE = """# (Line 1 above is Windows batch; Python skipped it with -x. On macOS the
 #  .command variant is used instead, which needs no such trick.)

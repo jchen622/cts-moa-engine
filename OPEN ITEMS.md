@@ -65,6 +65,28 @@ machine and nothing is transmitted, but the question should be asked rather than
 sees people who submitted an abstract — 5 of 25 candidate sponsors against the 2026 export.
 Most sponsor clin pharm leads attend without presenting.
 
+## Settled on 2026-08-31 — why Python is still a prerequisite
+
+A frozen binary (PyInstaller) would remove the Python install, and PyInstaller 6.22.2 does
+support Python 3.14. It was tried and rejected on evidence:
+
+- **It swaps one friction for a worse one.** On macOS 15+ an unsigned, downloaded app can no
+  longer be opened with right-click -> Open; the user must go to System Settings -> Privacy &
+  Security -> Open Anyway. On Windows an unsigned .exe raises SmartScreen, and PyInstaller
+  output is frequently flagged by antivirus. Genuinely one-click needs paid code signing on
+  both platforms (Apple Developer $99/yr + notarisation, and a Windows signing certificate).
+- **Cross-compiling is impossible.** A Windows .exe cannot be built from macOS; that would
+  need GitHub Actions (`windows-latest`) or a PC. An Intel Mac would need its own build.
+- **The build failed on this machine anyway** — `lipo` is broken because the local Xcode
+  install is missing `_XPCTypeBool` from `libxcodebuildLoader.dylib`. Same root cause as
+  `/usr/bin/python3` being a dead stub here. Fixable with
+  `sudo xcode-select -s /Library/Developer/CommandLineTools`, not done.
+
+Instead the launchers now **open python.org automatically** when no working Python is found,
+with plain instructions. One two-minute install per machine, then nothing.
+
+Revisit only if this goes to enough people to justify code-signing certificates.
+
 ## Data gap, not a code defect
 
 `input/contacts.xlsx` has 44 companies and almost no names, so most candidates come through as
