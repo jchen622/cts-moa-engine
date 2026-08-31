@@ -26,7 +26,8 @@ except ImportError:                                          # pragma: no cover
     print("Pillow is not installed — keeping the default icon.")
     sys.exit(0)
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# Lives in dev/, but operates on the app bundle one level up.
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(HERE, "CTS MOA Engine.app")
 S = 1024                       # master size; every other size is downsampled
 

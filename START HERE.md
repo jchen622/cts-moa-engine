@@ -14,33 +14,25 @@ You do not need to know any programming to use it.
 
 ## To run it
 
-### On a Mac
+**Double-click the one file you were sent.**
 
-**Double-click `CTS MOA Engine`** — the blue molecule icon.
+| You are on | The file |
+|---|---|
+| a Mac | `CTS MOA Engine.command` |
+| a Windows PC | `CTS MOA Engine.bat` |
 
-A window opens in your web browser with five numbered buttons. Work down the list.
+That single file is the whole program. A window opens in your web browser with
+numbered buttons — work down the list. **To stop, close the browser tab**; it shuts
+itself down a few seconds later. There is also a **Quit** button on the page.
 
-**To stop it, just close the browser tab.** The app shuts itself down a few seconds later.
-There is also a **Quit** button at the bottom of the page. You should never need to force-quit
-anything.
+> **Mac, first time only.** macOS may refuse to open it and say it is from an unidentified
+> developer. **Right-click** it → **Open** → **Open**. Once only.
+>
+> If double-clicking does nothing at all, the file lost its executable flag in transit.
+> Open Terminal and run: `chmod +x "CTS MOA Engine.command"`
 
-> **The first time only**, macOS may refuse to open it and say it is from an unidentified
-> developer. If that happens: **right-click** it → **Open** → **Open**. You only have to do
-> this once.
+> **Windows, first time only.** SmartScreen may warn. Click **More info** → **Run anyway**.
 
-If nothing happens, double-click **`Start MOA engine.command`** instead. That does the same
-thing but leaves a Terminal window open showing what it is doing, which is useful if
-something has gone wrong.
-
-### On a PC
-
-**Double-click `Start MOA engine.bat`.** Same browser window, same five buttons, and the same
-rule for stopping it: close the browser tab.
-
-> Windows support is new and has not yet been tried on an actual PC. If a button does
-> nothing, say so — nothing can be damaged, it just may not have been wired up correctly.
-
----
 
 ## What you need installed
 
@@ -188,9 +180,8 @@ scored what it did, so you can disagree with it.
 
 Press button **1**. It checks each piece in turn and says which one is unhappy.
 
-If the browser window never opens, double-click `Start MOA engine.command` (Mac) or
-`Start MOA engine.bat` (PC) instead — it prints an address like
-`http://127.0.0.1:61152/?t=…` that you can paste into your browser.
+If the browser window never opens, the launcher still prints an address like
+`http://127.0.0.1:61152/?t=…` in its window — paste that into your browser.
 
 `README.md` in this folder has the full detail, including how the tool decides what counts
 as "novel".

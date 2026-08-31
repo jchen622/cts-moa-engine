@@ -19,17 +19,17 @@ covers what you need to change the code safely. **Read `OPEN ITEMS.md` too.**
 ## Commands
 
 ```bash
-./moa-engine check                      # verify files + FDA + PubMed. Writes nothing.
-./moa-engine scan --days 120            # preview ranked candidates. Writes nothing.
-./moa-engine update --go                # append new candidates to the queue workbook
-./moa-engine dossier --year 2027 --go   # build the dossier workbook
-./moa-engine roster  --file X.xlsx --go # import a programme or attendee list (optional)
-./moa-engine invites --year 2027 --go   # draft letters FROM the dossier
+python3 moa_engine.py check                      # verify files + FDA + PubMed. Writes nothing.
+python3 moa_engine.py scan --days 120            # preview ranked candidates. Writes nothing.
+python3 moa_engine.py update --go                # append new candidates to the queue workbook
+python3 moa_engine.py dossier --year 2027 --go   # build the dossier workbook
+python3 moa_engine.py roster  --file X.xlsx --go # import a programme or attendee list (optional)
+python3 moa_engine.py invites --year 2027 --go   # draft letters FROM the dossier
 
 python3 backtest.py                     # the filter's test suite — must stay 18/19
 python3 selftest.py                     # the file layer's test suite — offline, <1s
-python3 gui.py                          # the browser app (what the .app launches)
-python3 build_icon.py                   # redraw the app icon into the bundle
+python3 gui.py                          # the browser app, against the live source
+python3 build_single_file.py            # rebuild the two files in SEND THIS/
 ```
 
 `--go` is required for any write; everything is dry-run otherwise. `--no-pubmed` skips
@@ -250,8 +250,14 @@ The engine is platform-independent stdlib. Only three things branch:
   `pythonw` does not flash a console
 - `scheduler` — launchd on macOS, `schtasks` on Windows, a printed `crontab -e` line on Linux
 
-Launchers are per-platform: `CTS MOA Engine.app` and `Start MOA engine.command` (macOS),
-`Start MOA engine.bat` and `moa-engine.bat` (Windows), `moa-engine` (macOS/Linux).
+There are exactly two launchers, both generated: `SEND THIS/CTS MOA Engine.command` (macOS)
+and `SEND THIS/CTS MOA Engine.bat` (Windows). Each is the whole program in one file and is
+both the GUI (no arguments) and the CLI (with arguments). Rebuild them with
+`python3 build_single_file.py` after ANY source change, or they ship stale.
+
+For development, run the live source directly — `python3 moa_engine.py <cmd>` or
+`python3 gui.py`. The old `.app` and `Start MOA engine.*` wrappers were removed because
+seven launchers in one folder made it unclear which single file to hand over.
 
 **The Windows paths have never run on Windows.** They were written from documented behaviour and
 exercised only by reloading `scheduler`/`gui` with `sys.platform` patched to `win32` — which

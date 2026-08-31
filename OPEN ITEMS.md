@@ -22,7 +22,7 @@ annotations migrate), and contacts moved ahead of the ASCPT columns.
 - ASCPT member directory is an optional upload, plus a `membership check list.xlsx` the
   tool writes so only specific names need verifying. **The directory is login-gated and is
   never scraped.**
-- `build_single_file.py` → `dist/CTS MOA Engine.command` and `.bat`, ~92 KB each,
+- `build_single_file.py` → `SEND THIS/CTS MOA Engine.command` and `.bat`, ~92 KB each,
   sh/Python and batch/Python polyglots. Modules load from memory; a working folder is
   created beside the file on first run. Mac path smoke-tested from a clean directory;
   **Windows still untested on real hardware.**
@@ -48,7 +48,7 @@ three defects this file used to list:
 ## Resolved on 2026-08-21 — attendee rosters and the meeting year
 
 The old "pending decision" on attendee rosters is settled. `sheets.load_roster()` reads one and
-adapts to whatever columns it has; `./moa-engine roster --file X.xlsx --go` (and the GUI's
+adapts to whatever columns it has; `python3 moa_engine.py roster --file X.xlsx --go` (and the GUI's
 sixth button) imports it. It is **optional** — with no roster the tool derives a proxy from
 that year's presenting authors.
 

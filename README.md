@@ -21,16 +21,15 @@ version of everything below, and read `START HERE.md` instead of this file.
 ```bash
 cd "~/Desktop/Desktop/05 Code and Tools/cts-moa-engine"
 
-./moa-engine check                    # verify data sources and files; writes nothing
-./moa-engine scan --days 120          # see what it would find; writes nothing
-./moa-engine update --go              # add new candidates to the queue
-./moa-engine dossier --year 2027 --go # build the pre-ASCPT dossier
+python3 moa_engine.py check                    # verify data sources and files; writes nothing
+python3 moa_engine.py scan --days 120          # see what it would find; writes nothing
+python3 moa_engine.py update --go              # add new candidates to the queue
+python3 moa_engine.py dossier --year 2027 --go # build the pre-ASCPT dossier
 #   ... read and edit the dossier ...
-./moa-engine invites --year 2027 --go # draft the invitation letters
+python3 moa_engine.py invites --year 2027 --go # draft the invitation letters
 ```
 
-On Windows, double-click **`Start MOA engine.bat`** and use `moa-engine.bat` in place of
-`./moa-engine` below. See §12.
+On Windows, use `python moa_engine.py` in place of `python3 moa_engine.py`.
 
 Requirements: **Python 3** and nothing else — no Claude or other AI tool, no account,
 no API key, no login. Standard library only. **Python 3**. Nothing else — no pip installs, no accounts, no credentials, no
@@ -88,10 +87,10 @@ tab mid-scan does not throw the scan away.
 The engine is **off by default**. To have it top up the queue monthly:
 
 ```bash
-./moa-engine start                 # 7th of each month, 09:17
-./moa-engine start --day 1 --hour 8
-./moa-engine status
-./moa-engine stop                  # removes it completely
+python3 moa_engine.py start                 # 7th of each month, 09:17
+python3 moa_engine.py start --day 1 --hour 8
+python3 moa_engine.py status
+python3 moa_engine.py stop                  # removes it completely
 ```
 
 `start` installs a macOS launchd job that runs only `update --go`. The annual dossier stays
@@ -176,7 +175,7 @@ All live in `input/`. None is required — the tool degrades rather than failing
 Without it every candidate reads `NEEDS LOOKUP`.
 
 **`ascpt program <year>.xlsx`** and **`ascpt attendees <year>.xlsx`** — one pair per meeting
-year, discovered by filename. Import them with `./moa-engine roster --file <path> --go`, which
+year, discovered by filename. Import them with `python3 moa_engine.py roster --file <path> --go`, which
 works out which kind it is and files it under the right name, or drop them in by hand.
 
 ### How the meeting year is used
@@ -240,12 +239,12 @@ ASCPT 2026 ran 4–7 March. Run the dossier about **four weeks before** the meet
 February — so there is time to write ahead and set up conversations:
 
 ```bash
-./moa-engine update --days 400 --go
-./moa-engine roster  --file ~/Downloads/ascpt-2027-programme.xlsx --go   # when published
-./moa-engine roster  --file ~/Downloads/ascpt-2027-attendees.xlsx --go   # if you can get it
-./moa-engine dossier --year 2027 --go
+python3 moa_engine.py update --days 400 --go
+python3 moa_engine.py roster  --file ~/Downloads/ascpt-2027-programme.xlsx --go   # when published
+python3 moa_engine.py roster  --file ~/Downloads/ascpt-2027-attendees.xlsx --go   # if you can get it
+python3 moa_engine.py dossier --year 2027 --go
 #   read it, edit it
-./moa-engine invites --year 2027 --go
+python3 moa_engine.py invites --year 2027 --go
 ```
 
 The two `roster` calls are optional. Without them the dossier still ranks candidates and still
@@ -263,7 +262,7 @@ Nothing is tied to one machine or one person, and there is no credential to shar
 3. They need Python 3 and nothing else.
 
 If you send the folder as a zip, the launcher may lose its executable bit. If double-clicking
-does nothing, they run once in Terminal: `chmod +x "Start MOA engine.command"`.
+does nothing, they run once in Terminal: `chmod +x "CTS MOA Engine.command"`.
 
 ---
 
@@ -271,13 +270,8 @@ does nothing, they run once in Terminal: `chmod +x "Start MOA engine.command"`.
 
 | File | Role |
 |---|---|
-| `CTS MOA Engine.app` | macOS double-clickable launcher — opens the browser app, no Terminal |
-| `build_icon.py` | draws the app icon and installs it into the bundle |
-| `Start MOA engine.command` | macOS, same but shows a Terminal window; useful when debugging |
-| `Start MOA engine.bat` | **Windows** double-clickable launcher |
 | `START HERE.md` | plain-language guide to send with the folder |
 | `gui.py` | the local browser app |
-| `moa-engine` / `moa-engine.bat` | command-line wrapper (macOS+Linux / Windows) |
 | `moa_engine.py` | command-line interface |
 | `sources.py` | the two FDA feeds and the novelty gate |
 | `classify.py` | modality tagging, coverage-gap flags, scoring |
@@ -311,7 +305,7 @@ touching `store.py` or `sheets.py`; run `backtest.py` after touching `sources.py
 To exercise the write path without touching your real files:
 
 ```bash
-./moa-engine update --go --output-dir /tmp/moa-test --no-pubmed
+python3 moa_engine.py update --go --output-dir /tmp/moa-test --no-pubmed
 ```
 
 ---
@@ -348,12 +342,12 @@ The engine itself is plain standard-library Python and platform-independent: the
 scoring, the `.xlsx` layer and the browser GUI all behave the same everywhere. Only the
 launchers and two OS calls differ.
 
-**Windows.** Double-click **`Start MOA engine.bat`**. Use `moa-engine.bat` for the
+**Windows.** Use `python moa_engine.py` for the CLI.
 command line:
 
 ```bat
-moa-engine.bat check
-moa-engine.bat update --go
+python moa_engine.py check
+python moa_engine.py update --go
 ```
 
 Install Python 3 from python.org and tick **"Add Python to PATH"** during setup. The
@@ -365,9 +359,9 @@ Scheduling uses **Task Scheduler** via `schtasks`, under the task name
 > **Untested.** The Windows code paths were written from documented behaviour and exercised
 > only by simulation on a Mac — the `schtasks` argv, the `os.startfile` branch and the
 > console-suppression flag are all unverified on real hardware. Someone on a PC should run
-> `moa-engine.bat check` and press each GUI button once before you rely on it. Nothing there
+> `python moa_engine.py check` and press each GUI button once before you rely on it. Nothing there
 > can damage data — the worst case is a button that does nothing.
 
-**Linux.** Everything works except the launchers and the schedule. Run `./moa-engine`
-directly, or `python3 gui.py` for the browser app. `moa-engine start` prints the `crontab -e`
+**Linux.** Everything works except the launchers and the schedule. Run `python3 moa_engine.py`
+directly, or `python3 gui.py` for the browser app. `python3 moa_engine.py start` prints the `crontab -e`
 line to add rather than editing your crontab for you. The folder-open button uses `xdg-open`.

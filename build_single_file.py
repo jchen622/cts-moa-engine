@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the two self-contained distributables.
 
-    dist/CTS MOA Engine.command   macOS  -- double-click, opens in Terminal
-    dist/CTS MOA Engine.bat       Windows -- double-click
+    SEND THIS/CTS MOA Engine.command   macOS  -- double-click
+    SEND THIS/CTS MOA Engine.bat       Windows -- double-click
 
 Each is one file containing the whole engine. The modules are gzipped, base64'd
 and registered in sys.modules **from memory**, so nothing is unpacked to disk
@@ -23,7 +23,7 @@ import stat
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DIST = os.path.join(HERE, "dist")
+DIST = os.path.join(HERE, "SEND THIS")
 
 # Runtime modules only. The build scripts and the icon generator are developer
 # tools and would just make the download bigger.

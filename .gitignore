@@ -11,4 +11,4 @@ __pycache__/
 # Build artefacts. These embed input/contacts.xlsx, which carries real
 # names and a work email address — they must never reach a hosted repo.
 # Rebuild with:  python3 build_single_file.py
-dist/
+SEND THIS/
