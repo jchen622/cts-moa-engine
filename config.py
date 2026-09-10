@@ -258,6 +258,36 @@ DOSSIER_COLUMNS = [
     "Candidate authors", "AE owner", "Attending?", "Comments",
 ]
 
+# Development codes and trade names to search alongside the INN.
+#
+# A newly approved drug is often absent from the literature under its INN: the
+# Phase 1 papers were written years earlier under the development code. Four of
+# seven candidates checked in Sep 2026 returned nothing until searched this way.
+# Keys are matched on the normalised INN stem, so a salt or suffix still hits.
+DRUG_ALIASES = {
+    "lunsotogene parvec": ["DB-OTO"],
+    # No alias for vusolimogene: its development code "RP1" is also a gene, a
+    # protein and a plasmid, and as a bare term it pulled in unrelated authors.
+    # An alias has to be more distinctive than the INN, not less.
+    "vipivotide tetraxetan": ["PSMA-617", "177Lu-PSMA-617"],
+    "enlicitide": ["MK-0616"],
+    "obecabtagene autoleucel": ["obe-cel", "AUTO1"],
+    "plozasiran": ["ARO-APOC3"],
+    "olezarsen": ["AKCEA-APOCIII-LRx", "ISIS 678354"],
+}
+
+
+def aliases_for(ingredient):
+    """Extra search terms for a drug, matched on its normalised stem."""
+    key = (ingredient or "").lower().strip()
+    if key in DRUG_ALIASES:
+        return DRUG_ALIASES[key]
+    for k, v in DRUG_ALIASES.items():          # tolerate salt/suffix drift
+        if k in key or key in k:
+            return v
+    return []
+
+
 # ---------------------------------------------------------------- editorial state
 # The 19 published MOA mini-reviews (Dec 2023 - Aug 2026), by INN.
 # Source: PubMed title-convention search; see the team deck, slide 2.

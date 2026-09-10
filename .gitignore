@@ -12,3 +12,5 @@ __pycache__/
 # names and a work email address — they must never reach a hosted repo.
 # Rebuild with:  python3 build_single_file.py
 SEND THIS/
+# A bundle run from inside SEND THIS/ creates its working folder there.
+SEND THIS/CTS MOA Engine/

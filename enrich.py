@@ -99,7 +99,38 @@ def _efetch_xml(pmids, retries=3):
     return b""
 
 
-def clinpharm_papers(drug, per_tier=8):
+def author_titles(name, org="", retmax=8):
+    """A person's own recent paper titles, for profiling what they work on.
+
+    The search MUST be anchored on their organisation. A bare name collides:
+    "Geary RS" alone returns an environmental-health researcher, not Ionis's
+    PK lead, and profiling the wrong person is worse than not profiling at all.
+    """
+    n = authors_mod.pubmed_author_query(name)
+    if not n:
+        return []
+    term = f'"{n}"[Author]'
+    anchor = _org_term(org)
+    if anchor:
+        term += f' AND {anchor}[Affiliation]'
+    ids, _ = _esearch(term, retmax=retmax)
+    if not ids and anchor:
+        return []            # no anchor match means we cannot trust a bare search
+    arts = authors_mod.parse_articles(_efetch_xml(ids))
+    return [a.get("title", "") for a in arts]
+
+
+def _org_term(org):
+    """The distinctive word in an organisation name, for an affiliation filter."""
+    words = [w for w in re.split(r"[^A-Za-z0-9]+", org or "") if len(w) > 3]
+    drop = {"inc", "llc", "ltd", "corp", "company", "pharmaceuticals",
+            "pharmaceutical", "pharma", "therapeutics", "biosciences",
+            "sciences", "holdings", "group", "limited", "gmbh"}
+    words = [w for w in words if w.lower() not in drop]
+    return words[0] if words else ""
+
+
+def clinpharm_papers(drug, per_tier=8, extra_terms=()):
     """Papers about this drug, tagged with which evidence tier found them.
 
     Tiers are searched in order and the results merged: a person appearing in
@@ -109,9 +140,17 @@ def clinpharm_papers(drug, per_tier=8):
     d = re.sub(r'["\\]', " ", drug).strip()
     if not d:
         return [], 0
+    # The INN alone often misses everything: the Phase 1 papers were published
+    # under the development code years before approval.
+    terms = [f'"{d}"[Title/Abstract]']
+    for t in extra_terms:
+        t = re.sub(r'["\\]', " ", str(t)).strip()
+        if t:
+            terms.append(f'"{t}"[All Fields]')
+    subject = "(" + " OR ".join(terms) + ")"
     found, total = {}, 0
     for tier, _label, query in authors_mod.TIERS:
-        ids, n = _esearch(f'"{d}"[Title/Abstract] AND {query}', retmax=per_tier)
+        ids, n = _esearch(f'{subject} AND {query}', retmax=per_tier)
         total += n
         for pmid in ids:
             found.setdefault(pmid, tier)      # keep the strongest (lowest) tier
@@ -123,12 +162,31 @@ def clinpharm_papers(drug, per_tier=8):
     return arts, total
 
 
-def sponsor_authors(drug, sponsor="", members=None):
-    """Ranked clinical pharmacologists for this drug, with their evidence."""
-    arts, total = clinpharm_papers(drug)
+def sponsor_authors(drug, sponsor="", members=None, brand="", profile_top=4):
+    """Ranked clinical pharmacologists for this drug, with their evidence.
+
+    Two passes. The first ranks on this drug's papers; the second looks up what
+    the leading candidates publish generally and re-ranks. The second pass is
+    what separates a clinical development lead from a clinical pharmacologist,
+    and it is limited to the top few names because it costs a PubMed round trip
+    each.
+    """
+    extra = list(config.aliases_for(drug))
+    if brand:
+        extra.append(brand)
+    arts, total = clinpharm_papers(drug, extra_terms=extra)
     if not arts:
         return [], 0
-    return authors_mod.rank(arts, sponsor, members=members), total
+    first = authors_mod.rank(arts, sponsor, members=members)
+    if not first or not profile_top:
+        return first, total
+    profiles = {}
+    for p in first[:profile_top]:
+        frac = authors_mod.profile_fraction(
+            author_titles(p["name"], p.get("org", "")))
+        if frac is not None:
+            profiles[authors_mod.person_key(p["name"])] = frac
+    return authors_mod.rank(arts, sponsor, members=members, profiles=profiles), total
 
 
 def enrich(rec, verbose=False, members=None):
@@ -136,7 +194,8 @@ def enrich(rec, verbose=False, members=None):
     drug = rec.get("ingredient") or rec.get("ingredient_raw") or ""
     sponsor = rec.get("sponsor_raw") or rec.get("Sponsor") or ""
     prior, detail = has_moa_review(drug)
-    people, npapers = sponsor_authors(drug, sponsor, members=members)
+    people, npapers = sponsor_authors(drug, sponsor, members=members,
+                                      brand=rec.get("brand") or rec.get("Brand", ""))
     if verbose:
         top = people[0]["name"] if people else "-"
         print(f"    {drug[:26]:26s} prior={prior!s:5s} papers={npapers:4d} "

@@ -51,7 +51,15 @@ CLINPHARM_STUDY = (
     '"absorption, distribution, metabolism"[Title/Abstract] OR '
     '"thorough QT"[Title/Abstract] OR "QT interval"[Title/Abstract] OR '
     '"healthy subjects"[Title/Abstract] OR "healthy volunteers"[Title/Abstract] OR '
-    '"healthy participants"[Title/Abstract])')
+    '"healthy participants"[Title/Abstract] OR '
+    # Modality-specific clinical pharmacology. For an oncolytic virus the
+    # equivalent of a mass-balance study is biodistribution and shedding; for a
+    # radioligand it is dosimetry; for a CAR-T it is cellular kinetics. Omitting
+    # these made the tier-1 search return nothing for exactly the modalities the
+    # series has the least coverage of.
+    '"biodistribution"[Title/Abstract] OR "shedding"[Title/Abstract] OR '
+    '"dosimetry"[Title/Abstract] OR "cellular kinetics"[Title/Abstract] OR '
+    '"tissue distribution"[Title/Abstract])')
 
 # Tier 2: the modelling side of the same job.
 PHARMACOMETRICS = (
@@ -102,6 +110,7 @@ def parse_articles(xml_bytes):
     for art in root.iter("PubmedArticle"):
         pmid = _text(art.find(".//PMID"))
         journal = _text(art.find(".//Journal/Title"))
+        title = _text(art.find(".//ArticleTitle"))
         year = _text(art.find(".//JournalIssue/PubDate/Year"))
         alist = art.findall(".//AuthorList/Author")
         authors = []
@@ -119,7 +128,7 @@ def parse_articles(xml_bytes):
             })
         if authors:
             out.append({"pmid": pmid, "journal": journal, "year": year,
-                        "authors": authors})
+                        "title": title, "authors": authors})
     return out
 
 
@@ -135,6 +144,22 @@ def person_key(name):
     if len(parts) < 2:
         return n
     return f"{parts[0][0]} {parts[-1]}"
+
+
+def pubmed_author_query(name):
+    """'Richard S Geary' -> 'Geary RS', which is how PubMed indexes authors.
+
+    Passing the display name straight into [Author] matches nothing, so every
+    profile lookup silently returned "unknown" and the own-record score never
+    fired. Surname first, then initials, no punctuation.
+    """
+    n = re.sub(r"[^A-Za-z\- ]", " ", name or "").strip()
+    parts = [x for x in n.split() if x]
+    if len(parts) < 2:
+        return n
+    surname = parts[-1]
+    initials = "".join(p[0].upper() for p in parts[:-1])
+    return f"{surname} {initials}"
 
 
 def _email(affil):
@@ -245,11 +270,44 @@ def programme_org(articles, min_papers=2):
     return org if n >= min_papers else ""
 
 
-def rank(articles, sponsor, members=None, limit=6):
+# What a clinical pharmacologist's OWN publication record looks like. Broad on
+# purpose: the modality-specific equivalents count, because for a CAR-T the PK
+# analogue is cellular kinetics, for an oncolytic virus it is biodistribution
+# and shedding, and for a radioligand it is dosimetry. An earlier keyword list
+# missed all three and wrongly demoted the right people.
+OWN_WORK = re.compile(
+    r"pharmacokinet|pharmacodynam|exposure.response|exposure\b|bioavailab|"
+    r"bioequival|mass balance|\bADME\b|drug.drug interaction|drug interaction|"
+    r"hepatic impair|renal impair|organ impair|thorough QT|QT interval|"
+    r"healthy (volunteer|subject|participant)|population (pharmaco|PK)|popPK|"
+    r"pharmacometric|PBPK|model-informed|modell?ing and simulation|"
+    r"cellular kinetic|cell kinetic|persistence and expansion|"
+    r"biodistribution|shedding|dosimetr|clearance|absorption|metabolis|"
+    r"dose.(response|selection|justification|optimi)|first-in-human", re.I)
+
+
+def profile_fraction(titles):
+    """How much of a person's own recent output is clinical pharmacology.
+
+    The single biggest source of wrong names. Being the most prominent company
+    author on a drug's papers identifies the person who leads the PROGRAMME,
+    which on a trial-heavy programme is the clinical development lead, not the
+    clinical pharmacologist. Their own back catalogue separates the two.
+    """
+    titles = [t for t in (titles or []) if t]
+    if not titles:
+        return None                      # unknown, not zero
+    return sum(1 for t in titles if OWN_WORK.search(t)) / len(titles)
+
+
+def rank(articles, sponsor, members=None, limit=6, profiles=None):
     """Rank people by how likely they are the drug's clinical pharmacologist.
 
     articles: [{pmid, journal, tier, authors:[...]}]
     members:  optional {normalised name -> org} from an ASCPT directory
+    profiles: optional {person_key -> fraction} from profile_fraction(); when a
+              person's own record is known, it moves them more than any single
+              paper does
     """
     prog_org = programme_org(articles)
     people = {}
@@ -330,6 +388,21 @@ def rank(articles, sponsor, members=None, limit=6):
         if p["moved"] and not p["sponsor"]:
             score -= 10
             why.append("industry, but a different company — may have moved")
+
+        # Their own back catalogue, when we have looked it up.
+        frac = (profiles or {}).get(person_key(p["name"]))
+        p["profile"] = frac
+        if frac is not None:
+            if frac >= 0.5:
+                score += 25
+                why.append(f"own record is clin pharm ({int(frac*100)}%)")
+            elif frac >= 0.25:
+                score += 8
+                why.append(f"some clin pharm in own record ({int(frac*100)}%)")
+            else:
+                score -= 22
+                why.append(f"own record is not clin pharm ({int(frac*100)}%); "
+                           f"likely clinical development")
 
         p["member"] = _member_of(p["name"], mem)
         if p["member"]:
