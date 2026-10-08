@@ -15,6 +15,10 @@ import os
 import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Set by the single-file bundle at startup so the page can show which build is
+# running. Empty when running from source, where the git log is the record.
+BUILD_STAMP = ""
 CACHE = os.path.join(HERE, "cache")
 SETTINGS_PATH = os.environ.get("MOA_SETTINGS", os.path.join(HERE, "settings.json"))
 

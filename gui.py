@@ -386,6 +386,7 @@ Ozempic"
 </div><button class="safe" data-a="open">Open</button></div>
 
 <div id="status"><div class="spin"></div><span id="statustext"></span></div>
+<div class="ptext" id="build" style="margin-top:14px;text-align:right">&nbsp;</div>
 <div class="pwrap" id="pwrap">
  <div class="ptrack"><div class="pfill" id="pfill"></div></div>
  <div class="ptext" id="ptext"></div>
@@ -531,6 +532,7 @@ $('#saveoutdir').addEventListener('click', () => {{
       if (d.ok) {{
         $('#outdir').value = d.output_dir;
   $('#mydrugs').value = d.manual_drugs || '';
+  $('#build').textContent = 'build ' + (d.build || '?');
         msg.style.color = '#1E6B52';
         msg.textContent = 'Saved. Results will go here from now on.';
       }} else {{
@@ -538,6 +540,7 @@ $('#saveoutdir').addEventListener('click', () => {{
         msg.textContent = d.error;
         $('#outdir').value = d.output_dir;
   $('#mydrugs').value = d.manual_drugs || '';
+  $('#build').textContent = 'build ' + (d.build || '?');
       }}
     }})
     .catch(() => {{ msg.style.color = '#9B3A3A';
@@ -582,6 +585,7 @@ $('#quit').addEventListener('click', async e => {{
 fetch('/where?t=' + encodeURIComponent(T)).then(r => r.json()).then(d => {{
   $('#outdir').value = d.output_dir;
   $('#mydrugs').value = d.manual_drugs || '';
+  $('#build').textContent = 'build ' + (d.build || '?');
   document.querySelectorAll('.yr').forEach(e => e.textContent = 'ASCPT ' + d.year);
 
   const src = [];
@@ -713,6 +717,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             history = sorted((y for y in files if y < year), reverse=True)
             self._json({
                 "output_dir": config.output_dir(),
+                "build": config.BUILD_STAMP or "running from source",
                 "manual_drugs": "\n".join(config.manual_drugs()),
                 "year": year,
                 "history": history,

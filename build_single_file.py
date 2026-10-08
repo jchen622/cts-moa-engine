@@ -16,6 +16,7 @@ what lets a single file be both double-clickable and runnable by Python.
 Run:  python3 build_single_file.py
 """
 import base64
+import datetime
 import gzip
 import json
 import os
@@ -41,6 +42,7 @@ BOOTSTRAP = r'''
 import base64, gzip, io, json, os, sys, types
 
 _PAYLOAD = "@@PAYLOAD@@"
+_BUILD = "@@BUILD@@"
 
 
 def _unpack():
@@ -118,6 +120,11 @@ def main():
     os.environ.setdefault("MOA_SETTINGS", os.path.join(appdir, "settings.json"))
     _install(payload, appdir)
     _seed(payload, appdir)
+    # So the page can show which build is running. Unzipping an old copy and
+    # wondering why a fix is missing is otherwise indistinguishable from the fix
+    # not working, which has now happened twice.
+    import config as _cfg
+    _cfg.BUILD_STAMP = _BUILD
 
     # --gui is how the Windows launcher asks for the browser app under
     # pythonw. Stripping it rather than special-casing means a bare
@@ -417,6 +424,7 @@ def _kb(path):
 
 
 def build():
+    build_stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     payload = {"modules": {}, "data": {}}
     for name in MODULES:
         path = os.path.join(HERE, name + ".py")
@@ -435,7 +443,7 @@ def build():
 
     blob = base64.b64encode(
         gzip.compress(json.dumps(payload).encode("utf-8"), 9)).decode("ascii")
-    body = BOOTSTRAP.replace("@@PAYLOAD@@", blob)
+    body = BOOTSTRAP.replace("@@PAYLOAD@@", blob).replace("@@BUILD@@", build_stamp)
 
     os.makedirs(DIST, exist_ok=True)
     out = []
