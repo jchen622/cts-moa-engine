@@ -134,11 +134,14 @@ ENGINE_ARGV = [sys.executable, "-u", os.path.join(HERE, "moa_engine.py")]
 class Job:
     """One running subprocess and the lines it has printed so far."""
 
+    PROGRESS_PREFIX = "::progress"
+
     def __init__(self):
         self.lines = []
         self.proc = None
         self.exit = None
         self.label = ""
+        self.progress = None          # (done, total, label) or None
         self.lock = threading.Lock()
 
     @property
@@ -150,6 +153,7 @@ class Job:
             if self.running:
                 return False
             self.lines = [f"$ moa-engine {' '.join(argv)}", ""]
+            self.progress = None      # reset, or a finished run leaves a stale bar
             self.exit = None
             self.label = label
             self.proc = subprocess.Popen(
@@ -162,10 +166,24 @@ class Job:
     def _pump(self):
         p = self.proc
         for line in p.stdout:
+            line = line.rstrip("\n")
+            # Progress markers drive the bar and are kept OUT of the log: one
+            # per candidate would bury everything worth reading.
+            if line.startswith(self.PROGRESS_PREFIX):
+                bits = line[len(self.PROGRESS_PREFIX):].strip().split(None, 2)
+                try:
+                    done, total = int(bits[0]), int(bits[1])
+                except (IndexError, ValueError):
+                    continue
+                with self.lock:
+                    self.progress = (done, total,
+                                     bits[2] if len(bits) > 2 else "")
+                continue
             with self.lock:
-                self.lines.append(line.rstrip("\n"))
+                self.lines.append(line)
         p.wait()
         with self.lock:
+            self.progress = None
             self.exit = p.returncode
             self.lines.append("")
             self.lines.append("--- finished ---" if p.returncode == 0
@@ -175,7 +193,7 @@ class Job:
         with self.lock:
             return {"lines": self.lines[since:], "total": len(self.lines),
                     "running": self.running, "exit": self.exit,
-                    "label": self.label}
+                    "label": self.label, "progress": self.progress}
 
     def stop(self):
         with self.lock:
@@ -265,6 +283,15 @@ PAGE = """<!DOCTYPE html>
         max-height:46vh; overflow:auto }}
  #status {{ display:none; margin-top:18px; align-items:center; gap:10px;
            font-weight:600 }}
+ /* Determinate where the engine knows the total, a moving stripe where it
+    does not. A phase with no countable work still has to look alive. */
+ .pwrap {{ margin-top:10px; display:none }}
+ .ptrack {{ height:7px; background:var(--line); border-radius:4px; overflow:hidden }}
+ .pfill {{ height:100%; width:0; background:var(--accent); border-radius:4px;
+           transition:width .35s ease }}
+ .pfill.indet {{ width:35%; animation:slide 1.1s ease-in-out infinite }}
+ @keyframes slide {{ 0%{{margin-left:-35%}} 100%{{margin-left:100%}} }}
+ .ptext {{ margin-top:5px; font-size:12px; color:var(--muted) }}
  .spin {{ width:15px; height:15px; border:2px solid var(--line);
          border-top-color:var(--blue); border-radius:50%;
          animation:s .8s linear infinite }}
@@ -359,6 +386,10 @@ Ozempic"
 </div><button class="safe" data-a="open">Open</button></div>
 
 <div id="status"><div class="spin"></div><span id="statustext"></span></div>
+<div class="pwrap" id="pwrap">
+ <div class="ptrack"><div class="pfill" id="pfill"></div></div>
+ <div class="ptext" id="ptext"></div>
+</div>
 <pre id="log"></pre>
 
 <div class="foot">
@@ -393,6 +424,7 @@ function busy(on, label) {{
   btns.forEach(b => b.disabled = on);
   $('#status').style.display = on ? 'flex' : 'none';
   $('#statustext').textContent = label || '';
+  renderProgress(null);
 }}
 
 async function poll() {{
@@ -405,6 +437,7 @@ async function poll() {{
     el.textContent += (el.textContent ? '\\n' : '') + d.lines.join('\\n');
     el.scrollTop = el.scrollHeight;
   }}
+  renderProgress(d.running ? d.progress : null);
   if (!d.running) {{ clearInterval(timer); timer = null; busy(false); }}
 }}
 
@@ -511,6 +544,23 @@ $('#saveoutdir').addEventListener('click', () => {{
                     msg.textContent = 'The engine is not responding.'; }});
 }});
 
+function renderProgress(p) {{
+  const wrap = $('#pwrap'), fill = $('#pfill'), text = $('#ptext');
+  if (!p) {{ wrap.style.display = 'none'; return; }}
+  const done = p[0], total = p[1], label = p[2] || '';
+  wrap.style.display = 'block';
+  if (total > 0) {{
+    fill.classList.remove('indet');
+    fill.style.width = Math.min(100, Math.round(done * 100 / total)) + '%';
+    text.textContent = done + ' of ' + total + (label ? '  \u00b7  ' + label : '');
+  }} else {{
+    // No total to count against, so show motion and the phase name only.
+    fill.classList.add('indet');
+    fill.style.width = '';
+    text.textContent = label || 'Working\u2026';
+  }}
+}}
+
 // Tidy case: tell it immediately rather than waiting out the heartbeat.
 // sendBeacon survives the page going away, where fetch() would be cancelled.
 addEventListener('pagehide', () => {{
@@ -589,7 +639,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------- routes
     def do_GET(self):
-        path = urllib.parse.urlparse(self.path).path
+        # Parse the query ONCE here. Both /setdrugs and /setoutdir referred to a
+        # `qs` that was never defined, so each raised NameError, the connection
+        # closed with no response, and the page reported "the engine is not
+        # responding" while the engine was in fact answering everything else.
+        parsed = urllib.parse.urlparse(self.path)
+        path, qs = parsed.path, urllib.parse.parse_qs(parsed.query)
         if path == "/":
             if not self._authed():
                 self._send(403, "Open the address the launcher printed.",
@@ -606,9 +661,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True})
             return
         if path == "/log":
-            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             try:
-                since = int(q.get("since", ["0"])[0])
+                since = int(qs.get("since", ["0"])[0])
             except ValueError:
                 since = 0
             touch()

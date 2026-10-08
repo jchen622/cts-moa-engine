@@ -296,6 +296,21 @@ def cmd_update(args):
     return 0
 
 
+PROGRESS_PREFIX = "::progress"
+
+
+def _progress(done, total, label=""):
+    """Tell the browser app how far along we are.
+
+    A marker line on stdout rather than a callback, because the GUI runs the
+    engine as a subprocess and already streams its output. `gui.Job` picks
+    these out and keeps them from the visible log. total=0 means indeterminate,
+    for a phase with no countable work; a bar stuck at zero through a two-minute
+    download looks broken, so those phases still announce themselves.
+    """
+    print(f"{PROGRESS_PREFIX} {int(done)} {int(total)} {label}", flush=True)
+
+
 def cmd_hotlist(args):
     """Build the contact hot list: which companies we need clin pharm contacts at.
 
@@ -315,7 +330,9 @@ def cmd_hotlist(args):
              - datetime.timedelta(days=int(months * 30.44))).isoformat()
     print(f"Hot list: approvals since {since} ({months} months)")
 
+    _progress(0, 0, "Checking what the series has published")
     report = gaps.gap_report(verbose=True)
+    _progress(0, 0, "Downloading FDA approvals")
     recs = sources.collect(since=since, verbose=True)
     print(f"  {len(recs)} novel agents in the window")
 
@@ -330,8 +347,11 @@ def cmd_hotlist(args):
               f"{os.path.basename(config.manual_drugs_file())}")
 
     out, considered = [], 0
-    for rec in list(manual_recs) + list(recs):
+    queue = list(manual_recs) + list(recs)
+    for rec in queue:
         considered += 1
+        _progress(considered, len(queue),
+                  (rec.get("ingredient_raw") or rec.get("ingredient") or "")[:40])
         drug = rec.get("ingredient") or rec.get("ingredient_raw") or ""
         brand = rec.get("brand", "")
         is_gap, tier, why = gaps.is_gap(rec, report)
@@ -366,7 +386,9 @@ def cmd_hotlist(args):
                   f"{r.get('ingredient_raw','')[:26]}")
         print("\n  dry run; add --go to write the workbook")
         return 0
+    _progress(len(queue), len(queue), "Writing the workbook")
     sheets.build_hotlist(out, report, months, args.top, total=args.total)
+    _progress(0, 0, "")
     return 0
 
 

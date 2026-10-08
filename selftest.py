@@ -446,6 +446,87 @@ def test_history_accumulates(tmp):
           sorted(a["history"], reverse=True), [2028, 2027, 2026])
 
 
+def test_bundle_arg_dispatch(tmp):
+    section("The bundle routes --gui to the browser app, not to argparse")
+    import re
+    import build_single_file as bsf
+
+    # The Windows launcher passes --gui under pythonw. The bootstrap treated any
+    # argument as a CLI subcommand, so argparse exited 2 -- and with no console
+    # that error was invisible: double-click, nothing happens. Exercise the real
+    # dispatch expression rather than trusting the source to look right.
+    m = re.search(r"args = (\[a for a in sys\.argv\[1:\][^\]]*\])", bsf.BOOTSTRAP)
+    check("the bootstrap filters argv rather than passing it through",
+          bool(m), True)
+    if not m:
+        return
+    expr = m.group(1)
+    for argv, want in ((["--gui"], []), ([], []),
+                       (["hotlist", "--go"], ["hotlist", "--go"]),
+                       (["--gui", "hotlist"], ["hotlist"])):
+        got = eval(expr, {"sys": type("S", (), {"argv": ["x"] + argv})})
+        check(f"argv {argv} -> {want}", got, want)
+
+    check("a crash is surfaced rather than swallowed",
+          "MessageBoxW" in bsf.BOOTSTRAP and "_die" in bsf.BOOTSTRAP, True)
+    check("the batch header is exactly one line",
+          bsf.WIN_HEADER.count("\n"), 1)
+
+
+def test_gui_endpoints(tmp):
+    section("Every GUI endpoint actually answers")
+    import http.server
+    import json as _json
+    import threading
+    import urllib.parse
+    import urllib.request
+
+    # Two endpoints shipped referring to a `qs` that was never defined in
+    # do_GET. Each raised NameError, the connection closed with no response,
+    # and the page said "the engine is not responding" while everything else
+    # worked. Nothing exercised them, so nothing caught it. This does.
+    os.environ["MOA_SETTINGS"] = os.path.join(tmp, "s.json")
+    with open(os.environ["MOA_SETTINGS"], "w") as fh:
+        _json.dump({"input_dir": os.path.join(tmp, "in"),
+                    "output_dir": os.path.join(tmp, "out")}, fh)
+    import importlib
+    import config as _c
+    importlib.reload(_c)
+    import gui
+    importlib.reload(gui)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), gui.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+
+    def call(path, **q):
+        q["t"] = gui.TOKEN
+        url = f"http://127.0.0.1:{port}{path}?" + urllib.parse.urlencode(q)
+        try:
+            with urllib.request.urlopen(url, timeout=10) as r:
+                return r.status, r.read().decode()
+        except Exception as e:
+            return 0, f"{type(e).__name__}: {e}"
+
+    cases = [("/alive", {}), ("/log", {"since": "0"}), ("/where", {}),
+             ("/setdrugs", {"text": "vericiguat"}),
+             ("/setoutdir", {"dir": os.path.join(tmp, "picked")})]
+    bad = []
+    for path, q in cases:
+        code, body = call(path, **q)
+        if code != 200:
+            bad.append(f"{path} -> {body[:60]}")
+            continue
+        try:
+            _json.loads(body)
+        except ValueError:
+            bad.append(f"{path} -> not JSON")
+    srv.shutdown()
+    check("all GET endpoints return 200 with JSON", bad, [])
+    check("the drug list reached disk",
+          os.path.exists(os.path.join(tmp, "in", _c.MANUAL_DRUGS_FILE)), True)
+
+
 def test_python_floor(tmp):
     section("Every module parses on the oldest Python a recipient may have")
     import glob
@@ -639,6 +720,8 @@ def main():
         test_attendance_columns(tmp)
         test_year_rollover()
         test_history_accumulates(tmp)
+        test_bundle_arg_dispatch(tmp)
+        test_gui_endpoints(tmp)
         test_python_floor(tmp)
         test_contact_carry_forward(tmp)
         test_clinpharm_tier1()

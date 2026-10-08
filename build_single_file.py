@@ -119,7 +119,12 @@ def main():
     _install(payload, appdir)
     _seed(payload, appdir)
 
-    args = sys.argv[1:]
+    # --gui is how the Windows launcher asks for the browser app under
+    # pythonw. Stripping it rather than special-casing means a bare
+    # double-click and the no-console path converge on the same code. Passing
+    # it through made argparse exit 2, and with no console that error was
+    # invisible: a Windows user double-clicked and nothing happened at all.
+    args = [a for a in sys.argv[1:] if a != "--gui"]
     if args:
         import moa_engine
         sys.exit(moa_engine.main(args))
@@ -131,7 +136,40 @@ def main():
     gui.main()
 
 
-main()
+def _die(exc):
+    """Make a startup failure visible when there is no console to print to.
+
+    Under pythonw on Windows, and under nohup on macOS, a traceback goes
+    nowhere. That is exactly how a SyntaxError in one module presented to the
+    user as "the browser tab did not open" with nothing to go on.
+    """
+    import tempfile
+    import traceback
+    log = os.path.join(tempfile.gettempdir(), "cts-moa-engine-error.log")
+    try:
+        with open(log, "w", encoding="utf-8") as fh:
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=fh)
+    except OSError:
+        pass
+    msg = (f"The CTS MOA engine could not start.\n\n{type(exc).__name__}: {exc}"
+           f"\n\nFull details: {log}")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, msg, "CTS MOA engine", 0x10)
+            return
+        except Exception:
+            pass
+    print(msg, file=sys.stderr)
+
+
+try:
+    main()
+except SystemExit:
+    raise
+except BaseException as _e:
+    _die(_e)
+    sys.exit(1)
 '''
 
 MAC_HEADER = """#!/bin/sh
@@ -159,9 +197,11 @@ MAC_HEADER = """#!/bin/sh
 # opens the Store instead of running anything.
 WIN_HEADER = (
     '@echo off & if "%~1"=="" (pyw -3 -c "pass" >nul 2>&1'
-    ' && (start "" pyw -3 -x "%~f0" --gui & exit /b)'
+    ' && (start "" pyw -3 -x "%~f0" --gui'
+    ' ^> "%TEMP%\\cts-moa-engine.log" 2^>^&1 & exit /b)'
     ' || pythonw -c "pass" >nul 2>&1'
-    ' && (start "" pythonw -x "%~f0" --gui & exit /b))'
+    ' && (start "" pythonw -x "%~f0" --gui'
+    ' ^> "%TEMP%\\cts-moa-engine.log" 2^>^&1 & exit /b))'
     ' & py -3 -c "pass" >nul 2>&1 && (py -3 -x "%~f0" %* & exit /b)'
     ' & python -c "pass" >nul 2>&1 && (python -x "%~f0" %* & exit /b)'
     ' & echo. & echo   This tool needs Python, which is not on this PC yet.'

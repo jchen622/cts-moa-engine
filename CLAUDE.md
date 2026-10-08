@@ -430,3 +430,39 @@ launches the app, **waits up to 20 seconds and confirms the process is alive**, 
 log tail if it is not. An earlier version exited after two seconds and reported success into a
 race with the detached launch, which is the same silent-failure class as the rest of this
 section.
+
+
+## Progress reporting
+
+The engine prints `::progress <done> <total> <label>` on stdout; `gui.Job._pump()` picks those
+lines out, stores the latest, and **keeps them out of `self.lines`** so the visible log stays
+readable. `snapshot()` carries `progress` to the page, which already polls `/log`, so no new
+polling was needed.
+
+`total=0` means indeterminate. Two phases of `hotlist` use it (downloading the FDA feeds, and
+the published-series query) because a bar sitting at zero through a two-minute download reads as
+broken. The per-candidate loop is determinate: about four network calls per candidate across
+180, which is where the wait actually is.
+
+Only `hotlist` emits markers. Every other command shows the spinner as before, and the page
+hides the bar when `progress` is null.
+
+## Two bug classes this codebase keeps producing
+
+Both have now bitten more than once, and both are gated:
+
+**An endpoint or path that is never exercised.** `/setdrugs` and `/setoutdir` both shipped
+referring to a `qs` that `do_GET` never defined. Each raised `NameError`, the connection closed
+with no response, and the page said "the engine is not responding" while the engine answered
+everything else fine. `selftest.test_gui_endpoints` now starts the real handler and calls every
+GET route; it was confirmed to FAIL with the bug reintroduced, so it is a gate rather than
+decoration.
+
+**A failure with nowhere to print.** Under `pythonw` on Windows and `nohup` on macOS a traceback
+vanishes, which is how a SyntaxError in one module presented to the user as "the browser tab did
+not open". The bundle's `main()` is wrapped: the traceback goes to
+`<temp>/cts-moa-engine-error.log` and, on Windows, into a `MessageBoxW` dialog. The `pythonw`
+branches of `WIN_HEADER` also redirect to `%TEMP%\cts-moa-engine.log`.
+
+`--gui` is stripped from argv rather than special-cased, so a bare double-click and the Windows
+no-console path converge. Passing it through made argparse exit 2 invisibly.
