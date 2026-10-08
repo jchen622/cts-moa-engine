@@ -516,8 +516,10 @@ def cmd_roster(args):
 def cmd_invites(args):
     """Draft the invitation letters, from the outreach list as it now stands.
 
-    A letter is drafted ONLY where an AE has filled in a contact. A blank
-    contact means no letter: the engine never invents a recipient, and a draft
+    A letter is drafted ONLY where an AE has filled in a contact, in EITHER
+    contact column: the main one or the one looked up in the ASCPT Membership
+    Directory. Both are a human naming a real person, so both count. Blank in
+    both means no letter: the engine never invents a recipient, and a draft
     addressed to a guess is worse than no draft at all.
     """
     dry = not args.go
@@ -536,33 +538,52 @@ def cmd_invites(args):
     columns, body = rows_all[0], rows_all[1:]
     try:
         drug_i = columns.index("Drug name")
-        contact_i = columns.index(sheets.CONTACT_COL)
     except ValueError:
-        _log(f"{os.path.basename(path_in)} is missing a 'Drug name' or "
-             f"'{sheets.CONTACT_COL}' column — was its header edited?")
+        _log(f"{os.path.basename(path_in)} is missing a 'Drug name' column "
+             f"— was its header edited?")
+        return 1
+    # Either contact column will do, and they are found by the same loose match
+    # the carry-forward uses, so a reworded header still works.
+    contact_cols = [i for i, h in enumerate(columns)
+                    if sheets._human_col(h) in (sheets.CONTACT_COL,
+                                                sheets.ASCPT_COL)]
+    if not contact_cols:
+        _log(f"{os.path.basename(path_in)} has no contact column "
+             f"— was its header edited?")
         return 1
 
-    # Banner and spacer rows carry no drug; they are layout, not candidates.
+    # Banner and spacer rows are layout, not candidates. Detected structurally,
+    # by every other cell being empty, rather than by matching the banner text:
+    # the wording changed to "TOP 20 BY HOT SCORE" and a prefix match on the old
+    # "PRIORITY" silently counted the banner as a 51st candidate.
+    def _is_banner(row):
+        return not any((c or "").strip()
+                       for i, c in enumerate(row) if i != drug_i)
+
     cand = [r for r in body
-            if len(r) > drug_i and r[drug_i].strip()
-            and not r[drug_i].startswith(("PRIORITY", "ALSO UNCOVERED"))]
-    ready = [r for r in cand
-             if contact_i < len(r) and r[contact_i].strip()
-             and r[contact_i].strip().upper() != "NEEDS LOOKUP"]
+            if len(r) > drug_i and r[drug_i].strip() and not _is_banner(r)]
+    def _contact_of(row):
+        for i in contact_cols:
+            v = row[i].strip() if i < len(row) else ""
+            if v and v.upper() != "NEEDS LOOKUP":
+                return v
+        return ""
+
+    ready = [r for r in cand if _contact_of(r)]
     skipped = len(cand) - len(ready)
 
     _log(f"{os.path.basename(path_in)}: {len(cand)} candidate(s), "
          f"{len(ready)} with a contact filled in")
     if not ready:
-        _log(f"\nNothing to draft yet. All {len(cand)} rows have an empty "
-             f"'{sheets.CONTACT_COL}' column.\n"
-             f"The AE team fills that in; the engine does not guess a recipient.")
+        _log(f"\nNothing to draft yet. All {len(cand)} rows are blank in both "
+             f"contact columns.\nThe AE team fills those in; the engine does "
+             f"not guess a recipient.")
         return 0
 
     rows = ready[:args.invites]
     _log(f"\ndrafting {len(rows)} letter(s):")
     for i, r in enumerate(rows, 1):
-        _log(f"  {i:>3}  {r[drug_i][:32]:32}  {r[contact_i][:38]}")
+        _log(f"  {i:>3}  {r[drug_i][:32]:32}  {_contact_of(r)[:38]}")
 
     path = sheets.write_invites(year, rows, columns, dry_run=dry)
     if skipped:

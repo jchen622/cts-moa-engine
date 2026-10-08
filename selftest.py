@@ -555,28 +555,56 @@ def test_python_floor(tmp):
 
 
 def test_contact_carry_forward(tmp):
-    section("Contacts the AE team typed survive the next run")
+    """All three of the team's columns survive the next run.
+
+    None of them can be regenerated. The ASCPT directory column in particular
+    is a lookup someone did one row at a time, so losing it silently is the
+    worst thing this file can do.
+    """
+    section("What the AE team typed survives the next run")
     import sheets
 
     cols = list(config.HOTLIST_COLUMNS)
     ci = cols.index(sheets.CONTACT_COL)
+    ai = cols.index(sheets.ASCPT_COL)
+    oi = cols.index(sheets.OWNER_COL)
     prior = [cols]
-    for drug, contact in (("AUCATZYL (obecabtagene autoleucel)", "Pierre L-S"),
-                          ("TRYNGOLZA (olezarsen)", ""),
-                          ("PLUVICTO (vipivotide tetraxetan)", "ask Erica")):
+    for drug, owner, contact, ascpt in (
+            ("AUCATZYL (obecabtagene autoleucel)", "JC", "Pierre L-S", ""),
+            ("TRYNGOLZA (olezarsen)", "", "", ""),
+            ("PLUVICTO (vipivotide tetraxetan)", "Erica", "", "Sanne de Jong"),
+    ):
         row = [""] * len(cols)
-        row[0], row[ci] = drug, contact
+        row[0], row[oi], row[ci], row[ai] = drug, owner, contact, ascpt
         prior.append(row)
     p = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-01.xlsx"),
                          {sheets.HOTLIST_TAB: prior})
 
     got = sheets._prior_contacts(p)
-    check("a filled-in contact is carried", got.get("obecabtagene autoleucel"),
+    check("a filled-in contact is carried",
+          got.get("obecabtagene autoleucel", {}).get(sheets.CONTACT_COL),
           "Pierre L-S")
-    check("a blank contact is not carried",
-          "olezarsen" in got, False)
-    check("matching is on the INN, not the brand",
-          got.get("vipivotide tetraxetan"), "ask Erica")
+    check("the AE owner is carried",
+          got.get("obecabtagene autoleucel", {}).get(sheets.OWNER_COL), "JC")
+    check("an ASCPT directory name is carried",
+          got.get("vipivotide tetraxetan", {}).get(sheets.ASCPT_COL),
+          "Sanne de Jong")
+    check("the two contact columns do not bleed into each other",
+          got.get("vipivotide tetraxetan", {}).get(sheets.CONTACT_COL), None)
+    check("a wholly blank row is not carried", "olezarsen" in got, False)
+
+    # These headers get reworded in Excel. An exact-string match would fail
+    # silently and the next run would write a blank sheet.
+    reworded = [["Drug name", "ASCPT member (clin pharm)", "Owner (AE)"],
+                ["AUCATZYL (obecabtagene autoleucel)", "Sanne de Jong", "JC"]]
+    p2 = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-02.xlsx"),
+                          {sheets.HOTLIST_TAB: reworded})
+    got2 = sheets._prior_contacts(p2)
+    check("a reworded ASCPT header still carries",
+          got2.get("obecabtagene autoleucel", {}).get(sheets.ASCPT_COL),
+          "Sanne de Jong")
+    check("a reworded owner header still carries",
+          got2.get("obecabtagene autoleucel", {}).get(sheets.OWNER_COL), "JC")
 
     # The brand can change between runs; the INN in parentheses is the anchor.
     check("a renamed brand still matches its drug",
@@ -588,6 +616,46 @@ def test_contact_carry_forward(tmp):
     check("a missing file is not an error", sheets._prior_contacts(
           os.path.join(tmp, "nope.xlsx")), {})
 
+
+def test_invitation_drafts():
+    """A draft names the drug and the contact, from either contact column.
+
+    The letter builder was still reading the retired dossier's column names,
+    so every draft rendered with no drug, no company and a contact of
+    NEEDS LOOKUP even where an AE had filled one in.
+    """
+    section("Invitation drafts read the outreach list's own columns")
+    import sheets
+
+    cols = list(config.HOTLIST_COLUMNS)
+    row = [""] * len(cols)
+    row[cols.index("Drug name")] = "AUCATZYL (obecabtagene autoleucel)"
+    row[cols.index("Company name")] = "Autolus, Inc."
+    row[cols.index("MOA")] = "A CD19-directed autologous CAR-T cell therapy."
+    row[cols.index("NDA/BLA number")] = "BLA 125813"
+    row[cols.index(sheets.OWNER_COL)] = "JC"
+    row[cols.index(sheets.ASCPT_COL)] = "Sanne de Jong"
+    html_out = sheets.build_invites_html([row], 2027, cols)
+
+    check("the drug name appears", "obecabtagene autoleucel" in html_out, True)
+    check("the company appears", "Autolus, Inc." in html_out, True)
+    check("the ASCPT-sourced contact is used",
+          "Sanne de Jong" in html_out, True)
+    check("and it is not reported as needing lookup",
+          "NEEDS LOOKUP" in html_out, False)
+    check("the label MOA appears", "CD19-directed" in html_out, True)
+    check("the AE owner appears", ">JC<" in html_out or "JC" in html_out, True)
+    # Standing instruction: no em dashes in anything a person reads. These
+    # drafts are sent to people outside Genentech.
+    check("no em dash in a letter that gets sent", "\u2014" in html_out, False)
+
+    blank = [""] * len(cols)
+    blank[cols.index("Drug name")] = "X (ydrug)"
+    out2 = sheets.build_invites_html([blank], 2027, cols)
+    check("with no contact it says so plainly",
+          "NEEDS LOOKUP" in out2, True)
+    check("and makes no promise to meet at ASCPT",
+          "in person" in out2, False)
 
 
 def _article(pmid, journal, authors_):
@@ -923,6 +991,7 @@ def main():
         test_gui_endpoints(tmp)
         test_python_floor(tmp)
         test_contact_carry_forward(tmp)
+        test_invitation_drafts()
         test_clinpharm_tier1()
         test_clinpharm_acquisition_and_drift()
         test_clinpharm_dose_escalation()

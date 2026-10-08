@@ -351,8 +351,8 @@ Four things that were measurably wrong before this, each now asserted in `selfte
   through this fallback, so it is load-bearing: do not remove it, extend the stem table.
 
 The per-drug classification, with its source and which axis flagged the gap, is written to
-the **Methodology sheet** of the outreach list. It is not on sheet 1: that sheet has exactly
-seven columns by editorial instruction.
+the **Methodology sheet** of the outreach list. It is not on sheet 1: that sheet's columns are
+fixed by editorial instruction.
 
 `labels.py` reads MOA and indications from the DailyMed SPL. Three traps are pinned there:
 indications can live in nested child sections (Pluvicto), the SPL states them twice (once in
@@ -363,18 +363,32 @@ Highlights), and a child section may be "Limitations of Use" rather than an indi
 ## The outreach list is the only outreach output
 
 `dossier` was retired on 2026-10-08. `hotlist` writes
-`output/MOA outreach list <date>.xlsx`, one file per date, with exactly seven columns:
-Drug name, MOA, Indication, NDA/BLA number, Approval date, Company name, Clin pharm contact.
+`output/MOA outreach list <date>.xlsx`, one file per date, with nine columns
+(`config.HOTLIST_COLUMNS`): Drug name, MOA, Indication, NDA/BLA number, Approval date,
+Company name, **AE owner**, **Clin pharm contact**, **ClinPharm contact from ASCPT Membership
+Directory**.
 
-**The contact column ships empty and the engine must never write to it.** It is the question
-being put to the AE team. `invites` drafts a letter only for rows where someone has filled it
-in, and reports how many were skipped.
+**The last three are the team's and the engine must never write to them.** They are the
+question being put to the AE team, and they ship blank on every run.
 
-**Carrying contacts forward is load-bearing.** One file per date means a run overwrites, so
-`sheets._prior_contacts()` reads today's file if it exists and otherwise the most recent earlier
-one, keyed on the INN inside `BRAND (ingredient)`. Without that, every run would hand the team a
-blank sheet and silently discard their work. `config.latest_hotlist_path()` picks by the date in
-the FILENAME, not mtime, because Drive sync rewrites mtimes.
+**The ASCPT column is manual by design, not by omission.** The Membership Directory is behind
+a member login and its terms do not permit compiling it into a list, so the engine does not
+query it: an AE looks a person up and types the name in. Do not add a scraper, and do not use
+the credentials that appear earlier in this project's transcripts. `roster` remains the
+supported path for ASCPT data: the user uploads an export they are entitled to.
+
+**`invites` accepts a contact from EITHER contact column**, since both are a human naming a
+real person. Blank in both means no letter, and it reports how many were skipped.
+
+**Carrying the three columns forward is load-bearing.** One file per date means a run
+overwrites, so `sheets._prior_contacts()` reads today's file if it exists and otherwise the most
+recent earlier one, keyed on the INN inside `BRAND (ingredient)` (which also survives a brand
+re-capitalisation: `AUCATZYL` to `Aucatzyl`). Without it, every run would hand the team a blank
+sheet and silently discard a directory lookup done one row at a time.
+`config.latest_hotlist_path()` picks by the date in the FILENAME, not mtime, because Drive sync
+rewrites mtimes. Headers are matched **loosely** (`sheets._human_col()`): anything mentioning
+ASCPT is the directory column, anything mentioning an owner is the owner column. An exact-string
+match would break the moment someone reworded a header in Excel, and it would break silently.
 
 **Hand-added drugs add to the priority block, they do not take its places.** `input/my drugs.txt`
 (one per line, brand or generic) goes through `sources.find_by_name()`, which deliberately
@@ -384,6 +398,15 @@ against metformin (1995), Ozempic by brand, and vericiguat.
 
 What retiring the dossier cost: ASCPT presence, poster times, "who to find", automatic contact
 matching. `authors.py` now has no caller and is dormant, though still covered by `selftest`.
+
+**The invitation letters were broken for a day and are now fixed.** `build_invites_html()` was
+still reading the retired dossier's column names ("Drug (INN)", "Sponsor", "Contact",
+"Candidate authors"), none of which exist on the outreach sheet, so every draft rendered with no
+drug name, no company, and a contact of NEEDS LOOKUP even where an AE had filled one in. It
+reads the outreach list's own columns now and `selftest.test_invitation_drafts` pins it. The
+banner row was also being counted as a candidate: the filter matched the prefix "PRIORITY" after
+the banner text had changed to "TOP 20 BY HOT SCORE", so the count read 51 for 50 rows. Banners
+are detected structurally now, by every other cell being blank.
 
 ## Label parsing: five traps, all pinned
 

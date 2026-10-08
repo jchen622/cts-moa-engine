@@ -189,9 +189,14 @@ def dossier_name(year):
 # being put to the AE team, not an answer the engine offers. Pre-filling it with
 # a paper's author would be worse than blank, because that person is frequently
 # not the right one to approach.
+# The last three are the team's, not the engine's. It ships them blank and
+# never writes a value into any of them, on any run. The ASCPT column is
+# deliberately manual: the member directory is behind a login and its terms do
+# not permit scraping, so an AE looks the person up and types the name in.
 HOTLIST_COLUMNS = [
     "Drug name", "MOA", "Indication", "NDA/BLA number", "Approval date",
-    "Company name", "Clin pharm contact",
+    "Company name", "AE owner", "Clin pharm contact",
+    "ClinPharm contact from ASCPT Membership Directory",
 ]
 
 # The gap analysis still decides what is on the list and still drives the
