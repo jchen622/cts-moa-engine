@@ -319,17 +319,28 @@ def cmd_hotlist(args):
     recs = sources.collect(since=since, verbose=True)
     print(f"  {len(recs)} novel agents in the window")
 
+    # Drugs the editor typed in. These skip the window, the novelty filter and
+    # the gap test: the point of typing one is that a human judged it worth
+    # including, and that judgement is the whole input. They may well be older
+    # than the window, which is exactly why the window must not apply.
+    manual_names = config.manual_drugs()
+    manual_recs = sources.find_by_name(manual_names) if manual_names else []
+    if manual_names:
+        print(f"  {len(manual_names)} drug(s) listed in "
+              f"{os.path.basename(config.manual_drugs_file())}")
+
     out, considered = [], 0
-    for rec in recs:
+    for rec in list(manual_recs) + list(recs):
         considered += 1
         drug = rec.get("ingredient") or rec.get("ingredient_raw") or ""
         brand = rec.get("brand", "")
         is_gap, tier, why = gaps.is_gap(rec, report)
-        if not is_gap:
-            continue
-        prior, _detail = enrich.has_moa_review(drug)
-        if prior:
-            continue                      # already written up; nothing to chase
+        if not rec.get("manual"):
+            if not is_gap:
+                continue
+            prior, _detail = enrich.has_moa_review(drug)
+            if prior:
+                continue                  # already written up; nothing to chase
         lab = labels.label_facts(drug, brand=brand)
         att = enrich.attention(drug, brand)
         score, terms = classify.hot_score(rec, tier, why, att)
@@ -342,8 +353,10 @@ def cmd_hotlist(args):
         if args.verbose:
             print(f"    {score:>4}  {drug[:28]:28s} {why[:44]}")
 
-    print(f"  {len(out)} gap-filling candidates with no existing review "
-          f"(of {considered} considered)")
+    n_manual = sum(1 for r in out if r.get("manual"))
+    print(f"  {len(out) - n_manual} gap-filling candidates with no existing review "
+          f"(of {considered} considered)"
+          + (f", plus {n_manual} added by hand" if n_manual else ""))
     if not out:
         print("  nothing to write")
         return 0
@@ -357,108 +370,7 @@ def cmd_hotlist(args):
     return 0
 
 
-def cmd_dossier(args):
-    """Build the outreach list: who to contact at each drug's company.
-
-    The objective is reaching the clinical pharmacologist who worked on the
-    drug. The ASCPT programme and attendee list are two further ways of getting
-    to that person, not the purpose of the exercise.
-    """
-    dry = not args.go
-    year = _meeting_year(args.year)
-
-    qpath = config.queue_path()
-    if not os.path.exists(qpath):
-        _log(f"No queue yet at {qpath}\nRun:  ./moa-engine update --go")
-        return 1
-    queue = sheets.read_queue(qpath)
-    _log(f"queue holds {len(queue)} candidate(s)")
-
-    cutoff = _iso_days_ago(args.window)
-    live = [r for r in queue
-            if (r.get("Approval date") or "") >= cutoff
-            and (r.get("Status") or "New").lower() not in ("published", "declined", "dropped")]
-    _log(f"{len(live)} within the trailing {args.window} days and still open")
-
-    # The UPCOMING meeting's programme, and only that one. Earlier years are
-    # attendance history, reported separately -- previously they were the same
-    # thing, so a 2027 dossier listed poster slots from March 2026.
-    files = config.meeting_files()
-    prog_file = (files.get(year) or {}).get("program")
-    program = sheets.load_program(prog_file)
-    if prog_file:
-        _log(f"AM{year} programme: {len(program['posters'])} poster(s), "
-             f"{len(program['sessions'])} session(s), "
-             f"presenter names {'present' if program['has_authors'] else 'ABSENT'}")
-        if not program["has_authors"]:
-            _log("  note: without a presenter/author column, matching is by "
-                 "company and title keyword only")
-    else:
-        _log(f"no AM{year} programme yet — no poster or session leads for the "
-             f"upcoming meeting")
-
-    attendance = sheets.build_attendance(year, files)
-    if attendance["current"]:
-        _log(f"AM{year} attendee list: {len(attendance['current'])} organisation(s)")
-    for y in sorted(attendance["history"], reverse=True):
-        _log(f"AM{y} history: {len(attendance['history'][y])} organisation(s) "
-             f"(from the {attendance['sources'][y]})")
-    if not attendance["current"] and not attendance["history"]:
-        _log("no attendance history on file")
-
-    rows = sheets.dossier_rows(live, program, attendance)
-
-    col = {c: i for i, c in enumerate(config.DOSSIER_COLUMNS)}
-    i_rank, i_drug = col["Rank"], col["Drug (INN)"]
-    i_score, i_pres = col["Novelty"], col["ASCPT presence"]
-    i_hist = col["Last year at ASCPT"]
-
-    i_contacts = col["Clin pharm contacts"]
-    with_leads = sum(1 for r in rows if r[i_pres] != "none found")
-    with_hist = sum(1 for r in rows if r[i_hist] != "not seen")
-    with_people = sum(1 for r in rows if r[i_contacts].strip())
-    _log(f"\n{len(rows)} candidate(s); {with_people} with a named clinical "
-         f"pharmacologist at the company")
-    _log(f"  also: {with_leads} present at AM{year}, "
-         f"{with_hist} whose sponsor has been to a previous meeting")
-    _log(f"\n{'rank':>4}  {'drug':24}  {'who to contact':60}")
-    _log("-" * 96)
-    for r in rows[:20]:
-        who = r[i_contacts].split(" | ")[0] if r[i_contacts].strip() else "—"
-        _log(f"{r[i_rank]:>4}  {r[i_drug][:24]:24}  {who[:60]}")
-    if len(rows) > 20:
-        _log(f"  … {len(rows) - 20} more")
-
-    path, name = sheets.write_dossier(year, rows, dry_run=dry)
-
-    # A short list of specific people to verify, not a copy of the directory.
-    known = _members()
-    check = sheets.membership_check_rows(live, known)
-    cpath = config.membership_check_path()
-    sheets.write_membership_check(cpath, check, dry_run=dry)
-
-    if dry:
-        kept = sheets.merge_annotations(rows, path)
-        annotated = sum(1 for r in kept
-                        if any(r[config.DOSSIER_COLUMNS.index(c)]
-                               for c in sheets.HUMAN_COLUMNS))
-        _log(f"\n[dry run] would write {path}")
-        if annotated:
-            _log(f"          {annotated} row(s) already carry your notes; "
-                 f"they would be preserved.")
-        _log("\nNothing was written. Re-run with --go.")
-    else:
-        _log(f"\nDossier: {path}")
-        if check:
-            _log(f"Membership check list: {cpath}")
-            _log(f"  {len(check)} name(s) with no membership answer yet. Fill in the "
-                 f"'ASCPT member?' column\n  (or ask members@ascpt.org to), then import "
-                 f"it back with:  ./moa-engine roster --file \"{cpath}\" --go")
-        _log("\nReview and edit it — reorder rows, fill in AE owner, drop what you "
-             "don't want.\nThen write the letters with:  "
-             f"./moa-engine invites --year {year} --go")
-    return 0
-
+# cmd_dossier() removed 2026-10-08: `hotlist` is the outreach list now.
 
 def cmd_roster(args):
     """Import an ASCPT attendee list or programme export for a meeting year.
@@ -569,44 +481,60 @@ def cmd_roster(args):
 
 
 def cmd_invites(args):
-    """Draft the invitation letters, from the dossier as it now stands."""
+    """Draft the invitation letters, from the outreach list as it now stands.
+
+    A letter is drafted ONLY where an AE has filled in a contact. A blank
+    contact means no letter: the engine never invents a recipient, and a draft
+    addressed to a guess is worse than no draft at all.
+    """
     dry = not args.go
     year = _meeting_year(args.year)
-    dpath = config.dossier_path(year, existing=True)
+    path_in = config.latest_hotlist_path() or config.hotlist_path()
 
-    if not os.path.exists(dpath):
-        _log(f"No dossier for {year} at {dpath}\n"
-             f"Run:  ./moa-engine dossier --year {year} --go")
+    if not os.path.exists(path_in):
+        _log(f"No outreach list found in {config.output_dir()}\n"
+             f"Run:  ./moa-engine hotlist --go")
         return 1
 
-    columns, rows = sheets.read_dossier(year)
-    if not rows:
-        _log(f"The {year} dossier has no candidate rows. Nothing to draft.")
+    rows_all = store.xlsx_read(path_in, sheets.HOTLIST_TAB)
+    if len(rows_all) < 2:
+        _log(f"{os.path.basename(path_in)} has no rows. Nothing to draft.")
         return 1
-    _log(f"dossier holds {len(rows)} candidate(s), in the order you left them")
-
-    rows = rows[:args.invites]
+    columns, body = rows_all[0], rows_all[1:]
     try:
-        drug_i = columns.index("Drug (INN)")
-        contact_i = columns.index("Contact")
+        drug_i = columns.index("Drug name")
+        contact_i = columns.index(sheets.CONTACT_COL)
     except ValueError:
-        _log("The outreach list is missing a 'Drug (INN)' or 'Contact' column — "
-             "was its header edited?")
+        _log(f"{os.path.basename(path_in)} is missing a 'Drug name' or "
+             f"'{sheets.CONTACT_COL}' column — was its header edited?")
         return 1
 
-    needs = sum(1 for r in rows
-                if contact_i >= len(r) or not r[contact_i].strip()
-                or r[contact_i].strip() == "NEEDS LOOKUP")
+    # Banner and spacer rows carry no drug; they are layout, not candidates.
+    cand = [r for r in body
+            if len(r) > drug_i and r[drug_i].strip()
+            and not r[drug_i].startswith(("PRIORITY", "ALSO UNCOVERED"))]
+    ready = [r for r in cand
+             if contact_i < len(r) and r[contact_i].strip()
+             and r[contact_i].strip().upper() != "NEEDS LOOKUP"]
+    skipped = len(cand) - len(ready)
+
+    _log(f"{os.path.basename(path_in)}: {len(cand)} candidate(s), "
+         f"{len(ready)} with a contact filled in")
+    if not ready:
+        _log(f"\nNothing to draft yet. All {len(cand)} rows have an empty "
+             f"'{sheets.CONTACT_COL}' column.\n"
+             f"The AE team fills that in; the engine does not guess a recipient.")
+        return 0
+
+    rows = ready[:args.invites]
     _log(f"\ndrafting {len(rows)} letter(s):")
     for i, r in enumerate(rows, 1):
-        contact = r[contact_i] if contact_i < len(r) else ""
-        _log(f"  {i:>3}  {r[drug_i][:32]:32}  {(contact or 'NEEDS LOOKUP')[:38]}")
+        _log(f"  {i:>3}  {r[drug_i][:32]:32}  {r[contact_i][:38]}")
 
     path = sheets.write_invites(year, rows, columns, dry_run=dry)
-    if needs:
-        _log(f"\n{needs} of {len(rows)} still say NEEDS LOOKUP — fill the contact "
-             f"grid in\nand re-run to improve them. The tool will not guess a "
-             f"recipient.")
+    if skipped:
+        _log(f"\n{skipped} row(s) skipped: no contact filled in yet. Add one and "
+             f"re-run.")
     if dry:
         _log(f"\n[dry run] would write {path}")
         _log("Nothing was written. Re-run with --go.")
@@ -700,13 +628,6 @@ def main(argv=None):
     sp.add_argument("--go", action="store_true", help="actually write the file")
     sp.set_defaults(fn=cmd_hotlist)
 
-    sp = out_flag(sub.add_parser("dossier",
-                       help="build the outreach list — who to contact at each company"))
-    sp.add_argument("--year", type=int, help="meeting year (default: next meeting)")
-    sp.add_argument("--window", type=int, default=550,
-                    help="include approvals from the trailing N days (default 550)")
-    sp.add_argument("--go", action="store_true", help="actually write the file")
-    sp.set_defaults(fn=cmd_dossier)
 
     sp = sub.add_parser(
         "roster",

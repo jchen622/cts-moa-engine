@@ -55,7 +55,7 @@ ACTIONS = {
     "check":   {"argv": ["check"],           "writes": False, "outdir": True},
     "scan":    {"argv": ["scan"],            "writes": False, "outdir": False},
     "update":  {"argv": ["update", "--go"],  "writes": True,  "outdir": True},
-    "dossier": {"argv": ["dossier", "--go"], "writes": True,  "outdir": True},
+    "hotlist": {"argv": ["hotlist", "--go"], "writes": True,  "outdir": True},
     "invites": {"argv": ["invites", "--go"], "writes": True,  "outdir": True},
     # Takes an uploaded workbook. The page still only names the action; the
     # path is minted here and never supplied by the browser.
@@ -84,6 +84,33 @@ def _stash_upload(b64):
     with os.fdopen(fd, "wb") as fh:
         fh.write(raw)
     return path
+
+
+def _validate_outdir(raw):
+    """-> (absolute path, "") or (None, reason).
+
+    Deliberately fussy. A typo like "/" or a path inside a system directory
+    would scatter workbooks somewhere unhelpful or fail confusingly halfway
+    through a run, so it is rejected before anything is written.
+    """
+    if not raw:
+        return None, "Type a folder path first."
+    path = os.path.abspath(os.path.expanduser(raw))
+    home = os.path.abspath(os.path.expanduser("~"))
+    if path == os.sep:
+        return None, "That is the whole disk. Pick a folder inside your home."
+    if not (path == home or path.startswith(home + os.sep)):
+        return None, ("Pick a folder inside your home folder, so the results "
+                      "are somewhere you can find and back up.")
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".moa-writable")
+        with open(probe, "w") as fh:
+            fh.write("ok")
+        os.remove(probe)
+    except OSError as e:
+        return None, f"Cannot write there ({e.strerror or e})."
+    return path, ""
 
 
 def _argv_for(action, upload_path=None):
@@ -168,8 +195,14 @@ JOB = Job()
 # A beacon on tab-close handles the tidy case, but beacons get dropped (browser
 # crash, laptop sleep, force-quit of the browser), so the heartbeat is the one
 # that actually guarantees no stray process.
-HEARTBEAT_GRACE = 90      # seconds to wait for the browser to open at all
-HEARTBEAT_TIMEOUT = 25    # seconds of silence before we call the page gone
+HEARTBEAT_GRACE = 120     # seconds to wait for the browser to open at all
+# 25 seconds was far too short and this was the bug behind "it dies while I am
+# still using it". Browsers THROTTLE setInterval in a background tab, to about
+# once a minute in Chrome and Safari, so switching tabs for half a minute looked
+# identical to closing the page and the server shut itself down. Then a refresh
+# hit a dead port. Ten minutes sits well clear of any throttling, and the page
+# also beats immediately whenever it becomes visible again.
+HEARTBEAT_TIMEOUT = 600
 _last_beat = [None]
 
 
@@ -266,19 +299,32 @@ mini&#8209;review. Work down the list.</p>
 
 <div class="step"><div class="num">4</div><div class="body">
  <div class="title">Build the outreach list</div>
- <div class="desc">Ranks your candidates and, for each one, names the <b>clinical
- pharmacologists at the company who actually worked on that drug</b> &mdash; found from
- their Phase 1 clinical pharmacology papers, with the evidence attached.
- Any notes you have already typed in are kept.</div>
+ <div class="desc">Drugs with a <b>novel mechanism the mini-review series has not
+ covered</b>, with the mechanism of action and approved indications from the FDA
+ label. The top 20 are highlighted; 30 more follow. The <b>clin pharm contact
+ column is left blank on purpose</b> &mdash; that is the column for the AE team
+ to fill in. Anything already filled in is carried over.</div>
  <div class="desc" id="whopulled" style="margin-top:8px"></div>
- <div class="tag w">Saves to your results folder</div>
-</div><button data-a="dossier">Build</button></div>
+ <div class="desc" style="margin-top:10px"><b>Drugs you want included anyway</b>
+  &mdash; one per line, brand or generic. These are added to the top 20 rather
+  than taking its places, and they can be any age, so an older drug of interest
+  is fine. The engine fills in the mechanism, indications and application number.</div>
+ <div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">
+  <textarea id="mydrugs" rows="3" spellcheck="false" placeholder="vericiguat
+Ozempic"
+    style="flex:1;min-width:0;padding:7px 9px;font:13px/1.45 ui-monospace,Menlo,
+           monospace;border:1px solid #b8c2ce;border-radius:5px;resize:vertical"></textarea>
+  <button class="safe" id="savedrugs" style="white-space:nowrap">Save list</button>
+ </div>
+ <div class="desc" id="drugsmsg" style="margin-top:6px">&nbsp;</div>
+ <div class="tag w">Saves to your results folder &middot; one file per day</div>
+</div><button data-a="hotlist">Build</button></div>
 
 <div class="step"><div class="num">5</div><div class="body">
  <div class="title">Write the invitation letters</div>
- <div class="desc">Drafts one letter per candidate, addressed to the clinical
- pharmacologist at the top of the list, from the outreach list exactly as you last edited it.
- Do step 4 first, then read it over and reorder or delete rows before coming here.</div>
+ <div class="desc">Drafts a letter <b>only for rows where someone has filled in a
+ contact</b>. Rows still blank are skipped and counted, so nothing is addressed to
+ a guess. Do step 4 first, fill in the contacts you know, then come here.</div>
  <div class="tag w">Saves to your results folder &middot; <b>no email is ever sent</b></div>
 </div><button data-a="invites">Write letters</button></div>
 
@@ -300,8 +346,16 @@ mini&#8209;review. Work down the list.</p>
 <input type="file" id="rosterfile" accept=".xlsx" style="display:none">
 
 <div class="step"><div class="num">&#128193;</div><div class="body">
- <div class="title">Open my results folder</div>
- <div class="desc" id="outdir">&nbsp;</div>
+ <div class="title">Where results are saved</div>
+ <div class="desc">Change this if you would rather keep them somewhere else,
+  a Drive folder for instance. The box starts on the current folder.</div>
+ <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+  <input type="text" id="outdir" spellcheck="false"
+         style="flex:1;min-width:0;padding:7px 9px;font:13px/1.3 ui-monospace,
+                Menlo,monospace;border:1px solid #b8c2ce;border-radius:5px">
+  <button class="safe" id="saveoutdir" style="white-space:nowrap">Use this folder</button>
+ </div>
+ <div class="desc" id="outdirmsg" style="margin-top:6px">&nbsp;</div>
 </div><button class="safe" data-a="open">Open</button></div>
 
 <div id="status"><div class="spin"></div><span id="statustext"></span></div>
@@ -388,8 +442,74 @@ $('#rosterfile').addEventListener('change', async e => {{
 
 // Keep the server alive while this tab is open. When the pings stop it exits
 // on its own, so nothing has to be force-quit.
+//
+// A background tab has its timers throttled to roughly once a minute, so this
+// cannot be the only signal and the server's timeout has to tolerate the gap.
+// Beating on visibilitychange covers the common case of coming back to the tab.
 let closing = false;
-setInterval(() => {{ if (!closing) fetch('/alive?t=' + encodeURIComponent(T)).catch(() => {{}}); }}, 6000);
+let missed = 0;
+function beat() {{
+  if (closing) return;
+  fetch('/alive?t=' + encodeURIComponent(T))
+    .then(() => {{ missed = 0; banner(false); }})
+    .catch(() => {{ if (++missed >= 2) banner(true); }});
+}}
+setInterval(beat, 15000);
+addEventListener('visibilitychange', () => {{ if (!document.hidden) beat(); }});
+addEventListener('focus', beat);
+
+// If the engine really has exited, say so plainly. A browser cannot restart a
+// local server by refreshing, so telling the reader to refresh would be a lie.
+function banner(dead) {{
+  let el = document.getElementById('deadbanner');
+  if (!dead) {{ if (el) el.remove(); return; }}
+  if (el) return;
+  el = document.createElement('div');
+  el.id = 'deadbanner';
+  el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;'
+    + 'background:#9B3A3A;color:#fff;padding:10px 16px;font:14px/1.4 Arial;';
+  el.textContent = 'The engine has stopped. Double-click "CTS MOA Engine" again '
+    + 'to restart it \u2014 refreshing this page will not bring it back.';
+  document.body.appendChild(el);
+}}
+
+$('#savedrugs').addEventListener('click', () => {{
+  const msg = $('#drugsmsg');
+  msg.textContent = 'Saving\u2026';
+  fetch('/setdrugs?t=' + encodeURIComponent(T)
+        + '&text=' + encodeURIComponent($('#mydrugs').value))
+    .then(r => r.json()).then(d => {{
+      msg.style.color = d.ok ? '#1E6B52' : '#9B3A3A';
+      msg.textContent = d.ok
+        ? (d.count ? d.count + ' drug(s) saved. They go on the next list you build.'
+                   : 'List cleared.')
+        : d.error;
+    }})
+    .catch(() => {{ msg.style.color = '#9B3A3A';
+                    msg.textContent = 'The engine is not responding.'; }});
+}});
+
+$('#saveoutdir').addEventListener('click', () => {{
+  const v = $('#outdir').value.trim();
+  const msg = $('#outdirmsg');
+  msg.textContent = 'Checking\u2026';
+  fetch('/setoutdir?t=' + encodeURIComponent(T) + '&dir=' + encodeURIComponent(v))
+    .then(r => r.json()).then(d => {{
+      if (d.ok) {{
+        $('#outdir').value = d.output_dir;
+  $('#mydrugs').value = d.manual_drugs || '';
+        msg.style.color = '#1E6B52';
+        msg.textContent = 'Saved. Results will go here from now on.';
+      }} else {{
+        msg.style.color = '#9B3A3A';
+        msg.textContent = d.error;
+        $('#outdir').value = d.output_dir;
+  $('#mydrugs').value = d.manual_drugs || '';
+      }}
+    }})
+    .catch(() => {{ msg.style.color = '#9B3A3A';
+                    msg.textContent = 'The engine is not responding.'; }});
+}});
 
 // Tidy case: tell it immediately rather than waiting out the heartbeat.
 // sendBeacon survives the page going away, where fetch() would be cancelled.
@@ -410,7 +530,8 @@ $('#quit').addEventListener('click', async e => {{
 // Say which meeting each button is about, using real years. "This year" and
 // "last year" are exactly the ambiguity this tool used to get wrong.
 fetch('/where?t=' + encodeURIComponent(T)).then(r => r.json()).then(d => {{
-  $('#outdir').textContent = d.output_dir;
+  $('#outdir').value = d.output_dir;
+  $('#mydrugs').value = d.manual_drugs || '';
   document.querySelectorAll('.yr').forEach(e => e.textContent = 'ASCPT ' + d.year);
 
   const src = [];
@@ -494,6 +615,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(JOB.snapshot(since))
             return
         touch()
+        if path == "/setdrugs":
+            # Free text, one drug per line, saved to input/my drugs.txt. The
+            # value is data for a lookup, not a command; the engine resolves
+            # each name against Drugs@FDA and silently reports the misses.
+            text = qs.get("text", [""])[0]
+            lines = [l.split("#")[0].strip() for l in text.replace("\r", "").split("\n")]
+            lines = [l for l in lines if l]
+            try:
+                os.makedirs(config.input_dir(), exist_ok=True)
+                with open(config.manual_drugs_file(), "w", encoding="utf-8") as fh:
+                    fh.write("# Drugs to include regardless of the filter.\n"
+                             "# One per line. Brand or generic. Older drugs are fine.\n")
+                    for l in lines:
+                        fh.write(l + "\n")
+                self._json({"ok": True, "count": len(lines)})
+            except OSError as e:
+                self._json({"ok": False, "error": str(e)})
+            return
+        if path == "/setoutdir":
+            # The page may choose WHERE output goes. That is not the same as
+            # letting it name a command: the value is a destination on the
+            # user's own machine, validated here, and every action still gets
+            # its argv built by _argv_for().
+            want = (qs.get("dir", [""])[0] or "").strip()
+            ok, msg = _validate_outdir(want)
+            if ok:
+                st = config.load_settings(required=False)
+                st["output_dir"] = ok
+                config.save_settings(st)
+                config.set_output_dir(None)        # drop any per-run override
+                self._json({"ok": True, "output_dir": config.output_dir()})
+            else:
+                self._json({"ok": False, "error": msg,
+                            "output_dir": config.output_dir()})
+            return
         if path == "/where":
             # The page states the actual years rather than saying "this year"
             # and "last year", so it is never ambiguous which meeting a button
@@ -503,6 +659,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             history = sorted((y for y in files if y < year), reverse=True)
             self._json({
                 "output_dir": config.output_dir(),
+                "manual_drugs": "\n".join(config.manual_drugs()),
                 "year": year,
                 "history": history,
                 "have_program": bool((files.get(year) or {}).get("program")),

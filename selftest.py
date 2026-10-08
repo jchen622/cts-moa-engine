@@ -198,18 +198,18 @@ def test_annotation_merge(tmp):
         print("  skip  sheets.merge_annotations not implemented yet")
         return
 
-    cols = ["Rank", "Drug (INN)", "Novelty", "AE owner", "Attending?", "Comments"]
+    cols = ["Rank", "Drug name", "Novelty", "AE owner", "Attending?", "Comments"]
     prior = [cols,
              ["1", "giredestrant", "84", "JC", "yes", "met at PI-072"],
              ["2", "obeldesivir", "72", "", "no", "declined"],
              ["3", "tirzepatide", "66", "AB", "", "chase in Feb"]]
-    p = store.xlsx_write(os.path.join(tmp, "dossier.xlsx"), {"Dossier": prior})
+    p = store.xlsx_write(os.path.join(tmp, "prior.xlsx"), {"Prior": prior})
 
     # A later run: re-ranked, tirzepatide gone, a new drug arrived.
     fresh = [["1", "tirzepatide", "70", "", "", ""],
              ["2", "giredestrant", "84", "", "", ""],
              ["3", "veligrotug", "61", "", "", ""]]
-    merged = sheets.merge_annotations(fresh, p, cols)
+    merged = sheets.merge_annotations(fresh, p, cols, tab="Prior")
     by_drug = {r[1]: r for r in merged}
 
     check("annotations follow the drug, not the row position",
@@ -446,31 +446,42 @@ def test_history_accumulates(tmp):
           sorted(a["history"], reverse=True), [2028, 2027, 2026])
 
 
-def test_wider_dossier_merge(tmp):
-    section("An old 16-column dossier merges into the 18-column layout")
+def test_contact_carry_forward(tmp):
+    section("Contacts the AE team typed survive the next run")
     import sheets
-    old_cols = ["Rank", "Drug (INN)", "Brand", "Sponsor", "Approval date", "Modality",
-                "Gap flag", "Novelty", "Prior review?", "ASCPT presence",
-                "Poster / session detail", "Contact", "Candidate authors",
-                "AE owner", "Attending?", "Comments"]
-    prior = [old_cols,
-             ["1", "bulevirtide", "", "GILEAD", "", "", "", "56", "no", "", "",
-              "", "", "JC", "yes", "met at PI-072"]]
-    p = store.xlsx_write(os.path.join(tmp, "old-dossier.xlsx"), {"Dossier": prior})
 
-    fresh = [["1", "bulevirtide"] + [""] * (len(config.DOSSIER_COLUMNS) - 2)]
-    merged = sheets.merge_annotations(fresh, p)
-    col = {c: i for i, c in enumerate(config.DOSSIER_COLUMNS)}
-    check("notes survive the column insertion",
-          [merged[0][col["AE owner"]], merged[0][col["Attending?"]],
-           merged[0][col["Comments"]]],
-          ["JC", "yes", "met at PI-072"])
-    check("the new columns stay empty rather than picking up shifted values",
-          [merged[0][col["Last year at ASCPT"]], merged[0][col["Who to find"]]],
-          ["", ""])
+    cols = list(config.HOTLIST_COLUMNS)
+    ci = cols.index(sheets.CONTACT_COL)
+    prior = [cols]
+    for drug, contact in (("AUCATZYL (obecabtagene autoleucel)", "Pierre L-S"),
+                          ("TRYNGOLZA (olezarsen)", ""),
+                          ("PLUVICTO (vipivotide tetraxetan)", "ask Erica")):
+        row = [""] * len(cols)
+        row[0], row[ci] = drug, contact
+        prior.append(row)
+    p = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-01.xlsx"),
+                         {sheets.HOTLIST_TAB: prior})
+
+    got = sheets._prior_contacts(p)
+    check("a filled-in contact is carried", got.get("obecabtagene autoleucel"),
+          "Pierre L-S")
+    check("a blank contact is not carried",
+          "olezarsen" in got, False)
+    check("matching is on the INN, not the brand",
+          got.get("vipivotide tetraxetan"), "ask Erica")
+
+    # The brand can change between runs; the INN in parentheses is the anchor.
+    check("a renamed brand still matches its drug",
+          sheets._contact_key("SOMETHINGELSE (obecabtagene autoleucel)"),
+          sheets._contact_key("AUCATZYL (obecabtagene autoleucel)"))
+    check("different drugs do not collide",
+          sheets._contact_key("A (olezarsen)") ==
+          sheets._contact_key("B (plozasiran)"), False)
+    check("a missing file is not an error", sheets._prior_contacts(
+          os.path.join(tmp, "nope.xlsx")), {})
 
 
-# ------------------------------------------------- clinical-pharmacologist ID
+
 def _article(pmid, journal, authors_):
     """Minimal efetch-shaped XML. authors_ is [(fore, last, affiliation)].
 
@@ -601,7 +612,7 @@ def main():
         test_attendance_columns(tmp)
         test_year_rollover()
         test_history_accumulates(tmp)
-        test_wider_dossier_merge(tmp)
+        test_contact_carry_forward(tmp)
         test_clinpharm_tier1()
         test_clinpharm_acquisition_and_drift()
         test_clinpharm_dose_escalation()

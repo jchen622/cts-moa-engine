@@ -186,9 +186,13 @@ def dossier_name(year):
 # a paper's author would be worse than blank, because that person is frequently
 # not the right one to approach.
 HOTLIST_COLUMNS = [
-    "Company", "Drug", "MOA", "Indication(s)", "Approval date", "Gap",
-    "Clin pharm contact",
+    "Drug name", "MOA", "Indication", "NDA/BLA number", "Approval date",
+    "Company name", "Clin pharm contact",
 ]
+
+# The gap analysis still decides what is on the list and still drives the
+# ranking. It is simply no longer a column; the methodology sheet carries it,
+# so the sheet never becomes a list with no stated basis.
 
 # 36 months, not 12. Measured from the series itself: joining the 21 published
 # reviews to their Drugs@FDA approval dates gives a median approval-to-review
@@ -200,9 +204,55 @@ HOTLIST_TOP = 20          # highlighted priority block
 HOTLIST_TOTAL = 50        # rows on the sheet in all, so 30 below the priority block
 
 
+HOTLIST_STEM = "MOA outreach list"
+
+# Drugs the editor wants on the list regardless of what the filter thinks: one
+# per line, blank lines and # comments ignored. These ADD to the priority block
+# rather than competing for its 20 places, because a hand-typed drug reflects a
+# judgement the engine cannot make. They also bypass the date window, so an
+# older agent of interest can be included.
+MANUAL_DRUGS_FILE = "my drugs.txt"
+
+
+def manual_drugs_file():
+    return os.path.join(input_dir(), MANUAL_DRUGS_FILE)
+
+
+def manual_drugs():
+    p = manual_drugs_file()
+    if not os.path.exists(p):
+        return []
+    out = []
+    with open(p, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.split("#")[0].strip()
+            if line:
+                out.append(line)
+    return out
+
+
 def hotlist_path(today=None):
+    """One file per date. A same-day re-run overwrites rather than piling up."""
     d = (today or datetime.date.today()).isoformat()
-    return os.path.join(output_dir(), f"MOA contact hot list {d}.xlsx")
+    return os.path.join(output_dir(), f"{HOTLIST_STEM} {d}.xlsx")
+
+
+def latest_hotlist_path(before=None):
+    """The most recent earlier outreach list, for carrying contacts forward.
+
+    Without this, a run on a new date would hand the team a blank sheet and
+    silently discard everything they had filled in. Chosen by the date in the
+    filename rather than mtime, because a file copied or synced by Drive gets a
+    fresh mtime and would otherwise look like the newest.
+    """
+    import glob
+    import re as _re
+    out = []
+    for f in glob.glob(os.path.join(output_dir(), f"{HOTLIST_STEM} *.xlsx")):
+        m = _re.search(r"(\d{4}-\d{2}-\d{2})\.xlsx$", f)
+        if m and (before is None or m.group(1) < before):
+            out.append((m.group(1), f))
+    return max(out)[1] if out else None
 
 
 def legacy_dossier_path(year):

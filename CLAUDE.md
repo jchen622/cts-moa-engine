@@ -22,8 +22,7 @@ covers what you need to change the code safely. **Read `OPEN ITEMS.md` too.**
 python3 moa_engine.py check                      # verify files + FDA + PubMed. Writes nothing.
 python3 moa_engine.py scan --days 120            # preview ranked candidates. Writes nothing.
 python3 moa_engine.py update --go                # append new candidates to the queue workbook
-python3 moa_engine.py dossier --year 2027 --go   # build the dossier workbook
-python3 moa_engine.py hotlist --go              # which companies we need contacts at
+python3 moa_engine.py hotlist --go              # THE outreach list (dossier is retired)
 python3 moa_engine.py roster  --file X.xlsx --go # import a programme or attendee list (optional)
 python3 moa_engine.py invites --year 2027 --go   # draft letters FROM the dossier
 
@@ -308,3 +307,66 @@ Two rules in `gaps.py` carry the weight:
 indications can live in nested child sections (Pluvicto), the SPL states them twice (once in
 Highlights), and a child section may be "Limitations of Use" rather than an indication
 (orforglipron has exactly one child and that is what it is).
+
+
+## The outreach list is the only outreach output
+
+`dossier` was retired on 2026-10-08. `hotlist` writes
+`output/MOA outreach list <date>.xlsx`, one file per date, with exactly seven columns:
+Drug name, MOA, Indication, NDA/BLA number, Approval date, Company name, Clin pharm contact.
+
+**The contact column ships empty and the engine must never write to it.** It is the question
+being put to the AE team. `invites` drafts a letter only for rows where someone has filled it
+in, and reports how many were skipped.
+
+**Carrying contacts forward is load-bearing.** One file per date means a run overwrites, so
+`sheets._prior_contacts()` reads today's file if it exists and otherwise the most recent earlier
+one, keyed on the INN inside `BRAND (ingredient)`. Without that, every run would hand the team a
+blank sheet and silently discard their work. `config.latest_hotlist_path()` picks by the date in
+the FILENAME, not mtime, because Drive sync rewrites mtimes.
+
+**Hand-added drugs add to the priority block, they do not take its places.** `input/my drugs.txt`
+(one per line, brand or generic) goes through `sources.find_by_name()`, which deliberately
+bypasses the date window, the NME class filter and the novelty rule: the point of typing a drug
+is that a human judged it interesting, and it may well be older than the window. Verified
+against metformin (1995), Ozempic by brand, and vericiguat.
+
+What retiring the dossier cost: ASCPT presence, poster times, "who to find", automatic contact
+matching. `authors.py` now has no caller and is dormant, though still covered by `selftest`.
+
+## Label parsing: five traps, all pinned
+
+`labels.py` reads MOA and indications from the DailyMed SPL. Every one of these produced a
+confidently wrong cell before it was fixed, and `selftest` holds nine drugs against expected
+indication counts:
+
+1. **Nested child sections.** Pluvicto keeps its two indications in `1.1`/`1.2` children;
+   reading the section's own text returns empty.
+2. **A child that is not an indication.** Orforglipron has exactly one child and it is
+   "Limitations of Use", so taking children blindly yields a restriction, and stripping the
+   restriction then leaves nothing.
+3. **"are indicated", not "is indicated".** A combined label reads "RYBELSUS and OZEMPIC
+   tablets are indicated", so matching only "is" left the heading in the text.
+4. **Brand truncation must skip the heading.** Cutting at the first brand mention reduced the
+   Ozempic indication to the fragment "RYBELSUS and".
+5. **The Highlights copy restates indications in different words.** A prefix comparison missed
+   it; duplicates are now detected on overlap of significant words.
+
+## The GUI
+
+Two fixes on 2026-10-08, both user-reported:
+
+- **The server used to kill itself while still in use.** `setInterval` at 6s against a 25s
+  timeout, but browsers throttle background-tab timers to roughly once a minute, so switching
+  tabs for half a minute looked exactly like closing the page. Timeout is now 600s, the page
+  also beats on `visibilitychange`, and if the engine really has exited the page says so rather
+  than letting the reader think a refresh will help. A browser cannot restart a local server.
+- **No terminal window.** `SEND THIS/CTS MOA Engine.app` is an `osacompile`d AppleScript that
+  launches the same bundled script with `nohup`. A `.command` is opened BY Terminal.app, so the
+  extension is what caused the window. Two things the .app must set: `MOA_APPDIR_BASE`, so the
+  working folder lands beside the .app rather than inside its bundle, and `PYTHONUNBUFFERED=1`,
+  the equivalent of `python3 -u`, without which `gui.log` stays empty and a user whose browser
+  did not open cannot find the URL.
+
+The page can now also set the output folder (validated in `gui._validate_outdir`: inside the
+home folder, writable, created if needed) and edit `input/my drugs.txt`.

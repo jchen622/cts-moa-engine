@@ -683,7 +683,8 @@ DOSSIER_TAB = "Dossier"
 HUMAN_COLUMNS = ("AE owner", "Attending?", "Comments")
 
 
-def merge_annotations(rows, path, columns=None, key_column="Drug (INN)"):
+def merge_annotations(rows, path, columns=None, key_column="Drug name",
+                      tab=None):
     """Carry a previous run's hand-typed columns onto freshly computed rows.
 
     Matched on drug name, not row position: between runs the ranking changes,
@@ -693,8 +694,8 @@ def merge_annotations(rows, path, columns=None, key_column="Drug (INN)"):
     Machine columns are always taken from ``rows`` -- a re-run is supposed to
     refresh scores and program matches.
     """
-    columns = columns or config.DOSSIER_COLUMNS
-    prior = store.xlsx_read(path, DOSSIER_TAB)
+    columns = columns or config.HOTLIST_COLUMNS
+    prior = store.xlsx_read(path, tab or HOTLIST_TAB)
     if len(prior) < 2:
         return rows
 
@@ -733,28 +734,10 @@ def merge_annotations(rows, path, columns=None, key_column="Drug (INN)"):
     return merged
 
 
-def write_dossier(year, rows, dry_run=True):
-    """Write the dossier workbook, keeping any annotations already in it."""
-    path = config.dossier_path(year)
-    name = config.dossier_name(year)
-    if dry_run:
-        return path, name
-    rows = merge_annotations(rows, path)
-    store.xlsx_write(path, {DOSSIER_TAB: [config.DOSSIER_COLUMNS] + rows})
-    return path, name
+# write_dossier() removed 2026-10-08: the hot list is the single outreach output.
 
-
-def read_dossier(year):
-    """The dossier as (columns, rows), for the invitation step to draft from.
-
-    Read back rather than recomputed, so edits made in the workbook -- a
-    reordering, a deleted row, an AE owner filled in -- carry into the drafts.
-    """
-    rows = store.xlsx_read(config.dossier_path(year, existing=True), DOSSIER_TAB)
-    if len(rows) < 2:
-        return [], []
-    return rows[0], [r for r in rows[1:] if any(c.strip() for c in r)]
-
+# read_dossier() removed 2026-10-08: the hot list is now the single outreach
+# output. See build_hotlist().
 
 def membership_check_rows(candidates, members=None):
     """One row per distinct person the engine surfaced, for manual verification.
@@ -834,7 +817,7 @@ def build_invites_html(rows, year, columns=None):
              "<p>Generated from the ASCPT recruiting dossier. Every draft below is a "
              "starting point: check the contact, confirm the author list, and edit the "
              "wording before sending. <b>Nothing here has been sent.</b></p>"]
-    cols = columns or config.DOSSIER_COLUMNS
+    cols = columns or config.HOTLIST_COLUMNS
     for r in rows:
         d = dict(zip(cols, r))
         ascpt = d.get("ASCPT presence", "none found")
@@ -967,6 +950,66 @@ def _hotlist_methodology(report, months, top, considered, shown):
     return rows
 
 
+HOTLIST_TAB = "Outreach list"
+CONTACT_COL = "Clin pharm contact"
+
+
+def _appl_label(rec):
+    """'NDA 219627' / 'BLA 761530', or blank.
+
+    A Purple Book CBER record has no Drugs@FDA application number, so it must
+    render empty rather than inventing one. Showing a wrong number on an
+    outreach sheet is worse than showing none.
+    """
+    no = (rec.get("appl_no") or "").strip()
+    kind = (rec.get("appl_type") or "").strip().upper()
+    if not no:
+        return ""
+    if not kind:
+        kind = "BLA" if no.startswith(("125", "761")) else "NDA"
+    return f"{kind} {no}"
+
+
+def _prior_contacts(path):
+    """{drug INN: contact} from an earlier outreach list, if there is one.
+
+    Keyed on the drug, never on row position: the ranking changes between runs,
+    so a positional carry-forward would move one drug's contact onto another.
+    """
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    try:
+        rows = store.xlsx_read(path, HOTLIST_TAB)
+    except Exception:
+        return out
+    if not rows:
+        return out
+    hdr = rows[0]
+    try:
+        di, ci = hdr.index("Drug name"), hdr.index(CONTACT_COL)
+    except ValueError:
+        return out
+    for r in rows[1:]:
+        if len(r) <= max(di, ci):
+            continue
+        drug, val = (r[di] or "").strip(), (r[ci] or "").strip()
+        if drug and val:
+            out[_contact_key(drug)] = val
+    return out
+
+
+def _contact_key(drug_cell):
+    """Match on the INN inside 'BRAND (ingredient)'.
+
+    The brand can change between runs and the display string carries both, so
+    the stable part is the ingredient in parentheses.
+    """
+    m = re.search(r"\(([^)]*)\)\s*$", drug_cell or "")
+    base = (m.group(1) if m else drug_cell or "")
+    return re.sub(r"[^a-z0-9]+", " ", base.lower()).strip()
+
+
 def build_hotlist(records, report, months, top, total=None, path=None, verbose=True):
     """Write the two-sheet hot-list workbook. -> path
 
@@ -975,7 +1018,15 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
     by hot score; everything else follows below a second banner, still present.
     """
     path = path or config.hotlist_path()
-    ranked = sorted(records, key=lambda r: -int(r.get("hot_score") or 0))
+    # Carry forward whatever the team has already filled in: from today's file
+    # if this is a re-run, otherwise from the most recent earlier one.
+    carried = _prior_contacts(path) or _prior_contacts(config.latest_hotlist_path())
+    # Hand-added drugs ADD to the priority block; they do not take one of its
+    # places. A typed drug carries an editorial judgement the score cannot, so
+    # letting it displace a high-scoring candidate would lose information.
+    manual = [r for r in records if r.get("manual")]
+    auto = [r for r in records if not r.get("manual")]
+    ranked = sorted(auto, key=lambda r: -int(r.get("hot_score") or 0))
     total = total or len(ranked)
     ranked = ranked[:total]                 # the sheet is capped, not the analysis
     pri = ranked[:top] if top else ranked
@@ -984,48 +1035,52 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
     header = list(config.HOTLIST_COLUMNS)
     rows, highlight, banner = [header], set(), set()
 
-    def block(label, items):
+    def block(label, items, priority=False):
         nonlocal rows
         if not items:
             return
         rows.append([label] + [""] * (len(header) - 1))
         banner.add(len(rows))
-        by_company = {}
-        for r in items:
-            by_company.setdefault(_normalise_company(r.get("sponsor_raw", "")) or "?",
-                                  []).append(r)
-        order = sorted(by_company,
-                       key=lambda c: -max(int(x.get("hot_score") or 0)
-                                          for x in by_company[c]))
-        for comp in order:
-            for i, r in enumerate(sorted(by_company[comp],
-                                         key=lambda x: -int(x.get("hot_score") or 0))):
-                inds = r.get("indications") or []
-                rows.append([
-                    r.get("sponsor_raw", "") if i == 0 else "",
-                    f"{r.get('brand','')} ({r.get('ingredient_raw','')})".strip(),
-                    r.get("moa", ""),
-                    "\n".join(f"{n}. {x}" for n, x in enumerate(inds, 1)) if len(inds) > 1
-                    else (inds[0] if inds else ""),
-                    r.get("approval_date", ""),
-                    r.get("gap_reason", ""),
-                    "",                       # never written by the engine
-                ])
-                if label.startswith("PRIORITY"):
-                    highlight.add(len(rows))
+        # Drug leads the sheet now, so rows are in plain hot-score order rather
+        # than grouped under a company heading.
+        for r in sorted(items, key=lambda x: -int(x.get("hot_score") or 0)):
+            inds = r.get("indications") or []
+            drug = f"{r.get('brand','')} ({r.get('ingredient_raw','')})".strip()
+            rows.append([
+                drug,
+                r.get("moa", ""),
+                "\n".join(f"{n}. {x}" for n, x in enumerate(inds, 1)) if len(inds) > 1
+                else (inds[0] if inds else ""),
+                _appl_label(r),
+                r.get("approval_date", ""),
+                r.get("sponsor_raw", ""),
+                # Blank unless an AE already filled it in on an earlier run.
+                # The engine never originates a value here.
+                carried.get(_contact_key(drug), ""),
+            ])
+            if priority:
+                highlight.add(len(rows))
 
-    block(f"PRIORITY  -  top {len(pri)} by hot score", pri)
+    if manual:
+        block(f"ADDED BY HAND  -  {len(manual)} drug(s) you asked for", manual,
+              priority=True)
+    block(f"TOP {len(pri)} BY HOT SCORE", pri, priority=True)
     if rest:
         rows.append([""] * len(header))
         block(f"ALSO UNCOVERED  -  {len(rest)} further candidates, not prioritised",
               rest)
 
-    tabs = {"Hot list": rows,
+    tabs = {HOTLIST_TAB: rows,
             "Methodology": _hotlist_methodology(report, months, top,
                                                 len(records), len(ranked))}
-    store.xlsx_write(path, tabs, highlight={"Hot list": highlight},
-                     banner={"Hot list": banner})
+    store.xlsx_write(path, tabs, highlight={HOTLIST_TAB: highlight},
+                     banner={HOTLIST_TAB: banner})
     if verbose:
-        print(f"  hot list: {len(pri)} priority + {len(rest)} further "
-              f"= {len(ranked)} of {len(records)} gap candidates -> {path}")
+        kept = sum(1 for row in rows[1:] if len(row) > 6 and (row[6] or "").strip())
+        hand = f"{len(manual)} by hand + " if manual else ""
+        print(f"  outreach list: {hand}{len(pri)} priority + {len(rest)} further "
+              f"= {len(manual) + len(ranked)} rows")
+        if kept:
+            print(f"    carried forward {kept} contact(s) already filled in")
+        print(f"    -> {path}")
     return path

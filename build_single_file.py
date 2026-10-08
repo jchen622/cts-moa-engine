@@ -19,7 +19,9 @@ import base64
 import gzip
 import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -48,12 +50,17 @@ def _unpack():
 def _appdir(bundle):
     """Working folder: "CTS MOA Engine" beside the bundle, else in Documents.
 
+    MOA_APPDIR_BASE overrides where "beside" means. The .app launcher sets it to
+    the folder holding the .app, because the script itself lives inside
+    Contents/Resources and output buried in there would be invisible.
+
     Beside the file is the obvious place to look for your own results. A bundle
     run from a read-only mount, or from inside a .zip a mail client unpacked to
     a temp folder, falls back to Documents rather than failing.
     """
-    beside = os.path.join(os.path.dirname(os.path.abspath(bundle)),
-                          "CTS MOA Engine")
+    base = os.environ.get("MOA_APPDIR_BASE") or os.path.dirname(
+        os.path.abspath(bundle))
+    beside = os.path.join(base, "CTS MOA Engine")
     for cand in (beside, os.path.join(os.path.expanduser("~"), "Documents",
                                       "CTS MOA Engine")):
         try:
@@ -147,7 +154,11 @@ MAC_HEADER = """#!/bin/sh
 # because a bare `python` on Windows may be the Microsoft Store stub, which
 # opens the Store instead of running anything.
 WIN_HEADER = (
-    '@echo off & py -3 -c "pass" >nul 2>&1 && (py -3 -x "%~f0" %* & exit /b)'
+    '@echo off & if "%~1"=="" (pyw -3 -c "pass" >nul 2>&1'
+    ' && (start "" pyw -3 -x "%~f0" --gui & exit /b)'
+    ' || pythonw -c "pass" >nul 2>&1'
+    ' && (start "" pythonw -x "%~f0" --gui & exit /b))'
+    ' & py -3 -c "pass" >nul 2>&1 && (py -3 -x "%~f0" %* & exit /b)'
     ' & python -c "pass" >nul 2>&1 && (python -x "%~f0" %* & exit /b)'
     ' & echo. & echo   This tool needs Python, which is not on this PC yet.'
     ' & echo. & echo   A download page is opening in your browser now.'
@@ -160,6 +171,74 @@ WIN_HEADER = (
 WIN_NOTE = """# (Line 1 above is Windows batch; Python skipped it with -x. On macOS the
 #  .command variant is used instead, which needs no such trick.)
 """
+
+
+APPLESCRIPT = """on run
+	try
+		set selfPath to POSIX path of (path to me)
+		set engine to selfPath & "Contents/Resources/engine.command"
+		-- The .app sits in the folder the user double-clicked in; output belongs
+		-- there, not inside the bundle. "path to me" ends with a slash, so two
+		-- levels up is the containing folder.
+		set base to do shell script "dirname " & quoted form of (selfPath)
+		do shell script "chmod +x " & quoted form of engine
+		-- Log rather than discard. If the browser fails to open, gui.log is the
+		-- only way the user can find the URL, and the old .app wrote one.
+		set logDir to base & "/CTS MOA Engine"
+		do shell script "mkdir -p " & quoted form of logDir
+		-- PYTHONUNBUFFERED is the equivalent of python3 -u here: the shell header
+		-- execs python itself, so the flag cannot be passed on the command line.
+		-- Without it the log stays empty and a user whose browser did not open has
+		-- no way to find the URL.
+		do shell script "PYTHONUNBUFFERED=1 MOA_APPDIR_BASE=" & quoted form of base & ¬
+			" nohup " & quoted form of engine & " >> " & ¬
+			quoted form of (logDir & "/gui.log") & " 2>&1 &"
+	on error errText
+		display dialog "Could not start the CTS MOA engine." & return & return & ¬
+			errText buttons {"OK"} default button 1 with icon stop
+	end try
+end run
+"""
+
+
+def _build_mac_app(command_path):
+    """Wrap the single file in a .app so double-clicking opens no terminal.
+
+    A .command is opened BY Terminal.app, so a window always appears; the
+    extension is what causes it, not anything Python does. An .app launches the
+    same script detached with nohup and shows nothing but the browser.
+
+    The payload lives in Contents/Resources, so the .app is self-contained and
+    Finder still shows it as a single item.
+    """
+    app = os.path.join(DIST, "CTS MOA Engine.app")
+    if os.path.isdir(app):
+        shutil.rmtree(app)
+    scpt = os.path.join(DIST, "_launcher.applescript")
+    with open(scpt, "w", encoding="utf-8") as fh:
+        fh.write(APPLESCRIPT)
+    rc = subprocess.call(["osacompile", "-o", app, scpt])
+    os.remove(scpt)
+    if rc != 0:
+        print("  osacompile failed; the .command is still usable")
+        return None
+    res = os.path.join(app, "Contents", "Resources")
+    dest = os.path.join(res, "engine.command")
+    shutil.copy2(command_path, dest)
+    os.chmod(dest, os.stat(dest).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    print(f"  {_kb(app)}  {app}  (no terminal window)")
+    return app
+
+
+def _kb(path):
+    total = 0
+    for root, _d, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return f"{total // 1024:>6} KB"
 
 
 def build():
@@ -194,6 +273,7 @@ def build():
 
     assert WIN_HEADER.count("\n") == 1, (
         "the batch header must be exactly one line -- python -x skips only the first")
+    _build_mac_app(mac)
     win = os.path.join(DIST, "CTS MOA Engine.bat")
     with open(win, "wb") as fh:
         fh.write(WIN_HEADER.encode("utf-8"))          # CRLF, written literally

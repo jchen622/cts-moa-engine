@@ -145,15 +145,20 @@ def split_indications(text, brand=""):
         return []
     t = re.sub(r"^\s*\d+(\.\d+)?\.?\s*(INDICATIONS AND USAGE|[A-Z][^.]{0,70}?)\s*(?=[A-Z]{3,})",
                "", text, flags=re.I)
-    # Everything before "is indicated" is the heading and the brand name.
-    m = re.search(r"\bis indicated\b", t, re.I)
+    # Everything before "is/are indicated" is the heading and the brand names.
+    # "are" matters: a combined label reads "RYBELSUS and OZEMPIC tablets are
+    # indicated", and matching only "is indicated" left the heading in place.
+    m = re.search(r"\b(?:is|are)\s+indicated\b", t, re.I)
     if m:
         t = t[m.end():]
     t = re.sub(r"\(\s*\d+(\.\d+)?\s*\)", " ", t)        # "( 1)" cross-references
     t = re.sub(r"\[see [^\]]*\]", " ", t, flags=re.I)
     t = re.split(r"\bLimitations? of Use\b", t, flags=re.I)[0]
+    # A bulleted label is unambiguous, so prefer the bullets over prose patterns.
+    parts = ([p for p in re.split(r"\s*[\u2022\u00b7\u25aa\u25cf]\s*", t) if p.strip()]
+             if re.search(r"[\u2022\u00b7\u25aa\u25cf]", t) else _SPLIT.split(t))
     out = []
-    for part in _SPLIT.split(t):
+    for part in parts:
         part = re.sub(r"\s+", " ", part).strip(" .;:,")
         # A trailing "BRAND is indicated..." fragment is the start of the
         # duplicate copy, not part of this indication.
@@ -162,11 +167,55 @@ def split_indications(text, brand=""):
         part = re.sub(r"\s+", " ", part).strip(" .;:,")
         if len(part) < 12:
             continue
-        key = re.sub(r"[^a-z0-9]", "", part.lower())[:55]
-        if any(key and (key in re.sub(r"[^a-z0-9]", "", o.lower())) for o in out):
+        if _is_duplicate(part, out):
             continue
         out.append(part)
     return out
+
+
+_FILLER = {"the", "a", "an", "of", "in", "to", "and", "or", "with", "for",
+           "adults", "adult", "patients", "patient", "who", "have", "has",
+           "been", "risk", "reduce", "treatment", "established", "non"}
+
+
+def _is_duplicate(part, seen):
+    """Is this the same indication already captured, worded differently?
+
+    A prefix comparison is not enough. The Highlights copy restates an
+    indication in different words: "major adverse cardiovascular (CV) events
+    (CV death, non-fatal myocardial infarction or non-fatal stroke)" against
+    "major adverse cardiovascular events (cardiovascular death, non-fatal
+    myocardial infarction, or non-fatal stroke)". Those diverge within the first
+    thirty characters but mean the same thing, so compare the significant words.
+    """
+    def bag(x):
+        w = re.findall(r"[a-z]{3,}", x.lower())
+        return {t for t in w if t not in _FILLER}
+    b = bag(part)
+    if not b:
+        return False
+    for o in seen:
+        ob = bag(o)
+        if not ob:
+            continue
+        overlap = len(b & ob) / min(len(b), len(ob))
+        if overlap >= 0.75:
+            return True
+    return False
+
+
+def _trim_duplicate(t, brand, min_offset=40):
+    """Cut the Highlights copy that follows, without cutting the heading.
+
+    Truncating at the first mention of the brand was wrong: a combined label
+    starts "RYBELSUS and OZEMPIC tablets are indicated", so cutting at the brand
+    left the single fragment "RYBELSUS and". Only a mention well past the start
+    can be the beginning of the repeated block.
+    """
+    if not brand:
+        return t
+    m = re.search(rf"\b{re.escape(brand)}\b", t[min_offset:], re.I)
+    return t[:min_offset + m.start()] if m else t
 
 
 def split_one(text, brand=""):
@@ -179,8 +228,7 @@ def split_one(text, brand=""):
     t = re.sub(r"\[see [^\]]*\]", " ", t, flags=re.I)
     # "Limitations of Use" is a restriction on the indication, not an indication.
     t = re.split(r"\bLimitations? of Use\b", t, flags=re.I)[0]
-    if brand:
-        t = re.split(rf"\b{re.escape(brand)}\b", t, flags=re.I)[0]
+    t = _trim_duplicate(t, brand)
     return re.sub(r"\s+", " ", t).strip(" .;:,")
 
 

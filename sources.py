@@ -527,3 +527,79 @@ def collect(since=None, until=None, verbose=True, novel_only=True):
             print(f"     {r['ingredient'][:34]:34s} {r['novelty_reason']}",
                   file=sys.stderr)
     return recs
+
+
+# ------------------------------------------------- lookup by name, any vintage
+def find_by_name(names, verbose=True):
+    """Look up drugs the editor named, regardless of age or novelty.
+
+    This bypasses the date window, the NME class filter and the novelty rule on
+    purpose. The point of a hand-added drug is that someone has judged it
+    interesting, and that judgement outranks the engine's: an older first-in-class
+    agent is exactly the kind of thing the series might want and the automated
+    filter will never surface.
+
+    Matches on active ingredient and on brand, because an editor is as likely to
+    type "Ozempic" as "semaglutide". Earliest original approval wins, so a drug
+    with later supplemental applications still reports when it first arrived.
+
+    -> [record], same shape as the feeds, plus manual=True.
+    """
+    wanted = [n.strip() for n in names if n and n.strip()]
+    if not wanted:
+        return []
+    raw = _fetch(config.DRUGS_AT_FDA_ZIP, "drugsatfda.zip", max_age_h=12)
+    zf = zipfile.ZipFile(io.BytesIO(raw))
+
+    def tsv(name):
+        with zf.open(name) as fh:
+            return list(csv.DictReader(
+                io.TextIOWrapper(fh, encoding="utf-8", errors="replace"),
+                delimiter="\t"))
+
+    apps = {r["ApplNo"]: r for r in tsv("Applications.txt")}
+    products = {}
+    for p in tsv("Products.txt"):
+        products.setdefault(p["ApplNo"], []).append(p)
+    first_ap = {}
+    for s in tsv("Submissions.txt"):
+        if s["SubmissionType"] != "ORIG" or s["SubmissionStatus"] != "AP":
+            continue
+        d = (s.get("SubmissionStatusDate") or "")[:10]
+        if not d:
+            continue
+        prev = first_ap.get(s["ApplNo"])
+        if prev is None or d < prev:
+            first_ap[s["ApplNo"]] = d
+
+    out, missing = [], []
+    for want in wanted:
+        key = re.sub(r"[^a-z0-9 ]+", " ", want.lower()).strip()
+        best = None
+        for appl_no, pl in products.items():
+            for p in pl:
+                ing = (p.get("ActiveIngredient") or "").lower()
+                brand = (p.get("DrugName") or "").lower()
+                if key and (key in ing or key in brand
+                            or any(key == c for c in _components(ing))):
+                    d = first_ap.get(appl_no, "")
+                    if d and (best is None or d < best[0]):
+                        best = (d, appl_no, p)
+                    break
+        if not best:
+            missing.append(want)
+            continue
+        d, appl_no, p = best
+        a = apps.get(appl_no, {})
+        rec = _rec(appl_no, "CDER", a.get("SponsorName", ""),
+                   p.get("DrugName", ""), p.get("ActiveIngredient", ""),
+                   d, "", "Added by hand", a.get("ApplType", ""),
+                   _route_from_form(p.get("Form", "")))
+        rec["manual"] = True
+        rec["novelty_reason"] = f"added by hand ({want})"
+        out.append(rec)
+    if verbose:
+        print(f"  added by hand: {len(out)} found"
+              f"{f', NOT FOUND: {', '.join(missing)}' if missing else ''}",
+              file=sys.stderr)
+    return out
