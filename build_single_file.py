@@ -30,9 +30,13 @@ DIST = os.path.join(HERE, "SEND THIS")
 
 # Runtime modules only. The build scripts and the icon generator are developer
 # tools and would just make the download bigger.
+# Kept closed under import by test_bundle_module_list in selftest.py: a module
+# missing here does not fail the build, it fails at the moment a user clicks the
+# button that needs it. rxclass was left off and the hot list would have raised
+# ImportError inside the bundle only.
 MODULES = ["config", "store", "sheets", "sources", "classify", "authors",
-           "enrich", "gaps", "labels", "scheduler", "gui", "moa_engine",
-           "backtest", "selftest"]
+           "enrich", "gaps", "labels", "rxclass", "scheduler", "gui",
+           "moa_engine", "backtest", "selftest"]
 
 # Small starter files. Deliberately NOT the ASCPT programme export: that is a
 # colleague's data and a point-in-time snapshot, not ours to redistribute.
@@ -398,9 +402,13 @@ def _package(app, command_path, bat_path):
         if rc != 0:
             print("  ditto failed; the .app is still in SEND THIS")
             return
-        shutil.rmtree(app)
+        # Keep the .app beside the zip rather than deleting it. The folder is
+        # the one place the owner actually launches from, and leaving only a zip
+        # meant unzipping a copy elsewhere, which is how a stale build got run
+        # while a newer zip sat next to it.
         os.remove(command_path)
-        print(f"  {_kb_file(mac_zip)}  {mac_zip}")
+        print(f"  {_kb(app)}  {app}  <- double-click this one")
+        print(f"  {_kb_file(mac_zip)}  {mac_zip}  <- send this one")
     win = os.path.join(DIST, "CTS MOA Engine (Windows).bat")
     if os.path.exists(win):
         os.remove(win)

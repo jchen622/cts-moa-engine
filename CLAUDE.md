@@ -257,6 +257,12 @@ and `SEND THIS/CTS MOA Engine.bat` (Windows). Each is the whole program in one f
 both the GUI (no arguments) and the CLI (with arguments). Rebuild them with
 `python3 build_single_file.py` after ANY source change, or they ship stale.
 
+**A new module must be added to `build_single_file.MODULES`.** That list is hand-maintained
+and a module missing from it does not fail the build: it fails when a user clicks the button
+that needs it, as an ImportError that only ever appears inside the bundle. `rxclass.py` was
+added and left off, so the hot list worked from source and would have raised in the `.app`.
+`selftest.test_bundle_module_list` now parses the imports and keeps the list closed.
+
 For development, run the live source directly — `python3 moa_engine.py <cmd>` or
 `python3 gui.py`. The old `.app` and `Start MOA engine.*` wrappers were removed because
 seven launchers in one folder made it unclear which single file to hand over.
@@ -299,9 +305,54 @@ Two rules in `gaps.py` carry the weight:
   about to be presented.
 - **The gap CATEGORY decides, not the fine modality label.** Olezarsen tags as "Antisense
   oligonucleotide" and the published imetelstat as "Oligonucleotide"; comparing fine labels
-  called siRNA / ASO an open gap when the series had covered it. Gaps are also **tiered**:
-  a named category gap scores +40 and a merely-unpublished mechanism class +12, because a
-  flat test let "MRI contrast agent" outrank an actual CAR-T gap.
+  called siRNA / ASO an open gap when the series had covered it. Gaps are **tiered**, and
+  the tiers are exclusive, strongest first: a named category gap scores +40, an unpublished
+  molecular format +12, an unpublished target class +8. A flat test let "MRI contrast agent"
+  outrank an actual CAR-T gap.
+
+
+## Modality is two axes, and format counts roll up
+
+Rewritten 2026-10-08. The 58 labels used to be one flat set mixing molecular format with
+target class, which made the coverage counts incomparable: of the 22 published papers, 18
+were filed by format and 4 by target class.
+
+- **Axis 1, molecular format**, hierarchical. `config.MODALITY_PARENT` is the child to parent
+  map and `config.modality_chain()` walks it. An ADC is an antibody; a kinase inhibitor is a
+  small molecule, so each paper increments **every level of its branch**.
+- **Axis 2, target class**, flat and independent. FDA's Established Pharmacologic Class via
+  `rxclass.py` (NLM RxClass, free, keyless, ~45% coverage) where the label carries one, the
+  INN-stem table otherwise. **The row records which source answered**, because a stem guess
+  must never be read as an FDA assignment on a sheet people act on.
+
+`classify.classify_modality()` returns `(format, target_class, gap_category)`. The old
+`modality()` two-tuple wrapper is kept for existing callers.
+
+Four things that were measurably wrong before this, each now asserted in `selftest.py`:
+
+- **Roll-up.** Small molecule read **10** when it is **14**; antibody read **3** when it is
+  **7**. A gap test on those numbers calls a modality uncovered that the series has published
+  on four times. Roll-up is directional: an ADC counts toward Antibody, a bare antibody does
+  not count toward ADC.
+- **The stem search only saw `rec["ingredient"]`**, which a Purple Book record truncates to
+  the first word ("afamitresgene"), so a stem in the second word was invisible and **every
+  `-leucel` cell therapy fell through to the fallback**, the worst place to lose the table,
+  since CBER products are the cell, gene and vaccine gaps. It now scans `ingredient_raw` too.
+- **`-leucel` is the WHO stem for an autologous T-cell product, not for a CAR.** CAR
+  specificity comes from `-cabtagene`. It mapped to "CAR-T cell therapy", which called
+  afamitresgene autoleucel, a TCR-T, a CAR-T.
+- **The fallback defaulted everything to "Small molecule"**, filing a fibrinogen concentrate
+  and an acellular nerve allograft as small molecules and inflating the very count the gap
+  test reads. Worse, the CBER branch asserted the named category "Cell & gene therapy" on
+  nothing but the reviewing centre, so fibrinogen scored +40 as an untouched cell and gene
+  therapy. The regulatory route decides now (NDA to small molecule, BLA to "Biologic
+  (unspecified)", a declared root that rolls up to nothing), and the name's shape only when
+  there is no application number at all. Ten of the 22 published drugs reach "Small molecule"
+  through this fallback, so it is load-bearing: do not remove it, extend the stem table.
+
+The per-drug classification, with its source and which axis flagged the gap, is written to
+the **Methodology sheet** of the outreach list. It is not on sheet 1: that sheet has exactly
+seven columns by editorial instruction.
 
 `labels.py` reads MOA and indications from the DailyMed SPL. Three traps are pinned there:
 indications can live in nested child sections (Pluvicto), the SPL states them twice (once in

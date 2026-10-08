@@ -702,6 +702,205 @@ def test_sponsor_affiliation_matching():
           authors._is_sponsor(MDA, "ABBVIE INC"), False)
 
 
+def test_modality_axes():
+    """The two-axis taxonomy, offline.
+
+    These are the two numbers that were wrong. The flat label set counted each
+    paper once under whatever label matched, so the four kinase inhibitors did
+    not count as small molecules and the ADC and three T-cell engagers did not
+    count as antibodies. A gap test built on 10 and 3 can call a modality
+    uncovered that the series has published on four times.
+    """
+    import classify
+    import config
+    import gaps
+    section("Modality taxonomy: two axes with roll-up")
+
+    cov, tcov = {}, {}
+    for d in config.PUBLISHED_MOA_DRUGS:
+        rec = {"ingredient": d.lower(), "ingredient_raw": d}
+        fmt, target, _g = classify.classify_modality(rec)
+        for label in config.modality_chain(fmt):
+            cov[label] = cov.get(label, 0) + 1
+        if target:
+            tcov[target] = tcov.get(target, 0) + 1
+
+    check("published fixture still has 22 drugs",
+          len(config.PUBLISHED_MOA_DRUGS), 22)
+    check("small molecule rolls up to 14 (was 10)", cov.get("Small molecule"), 14)
+    check("antibody rolls up to 7 (was 3)", cov.get("Antibody"), 7)
+    check("the ADC is still counted once as an ADC",
+          cov.get("Antibody-drug conjugate"), 1)
+
+    # Roll-up has to be directional, or "has the series covered ADCs?" would
+    # answer yes on the strength of three unrelated bispecifics.
+    chain = config.modality_chain("Antibody-drug conjugate")
+    check("ADC rolls up to Antibody", "Antibody" in chain, True)
+    check("Antibody does not roll down to ADC",
+          "Antibody-drug conjugate" in config.modality_chain("Antibody"), False)
+    check("roll-up terminates", len(chain) < 10, True)
+
+    # Mixing the axes is the original bug and the easiest thing to put back.
+    formats, targets = set(), set()
+    for stem, fmt, target, _gap in list(config.MODALITY_STEMS) + list(
+            config.MODALITY_KEYWORDS):
+        formats.add(fmt)
+        if target:
+            targets.add(target)
+    check("no label is used on both axes", sorted(formats & targets), [])
+    check("every format is declared in MODALITY_FORMATS",
+          sorted(formats - set(config.MODALITY_FORMATS)), [])
+    check("every parent is itself a declared format",
+          sorted(set(config.MODALITY_PARENT.values())
+                 - set(config.MODALITY_FORMATS)), [])
+
+    # Same target class, different format: the pair that proves the axes are
+    # genuinely independent rather than two names for one thing.
+    sema = classify.classify_modality({"ingredient": "semaglutide",
+                                       "ingredient_raw": "SEMAGLUTIDE"})
+    orfo = classify.classify_modality({"ingredient": "orforglipron",
+                                       "ingredient_raw": "ORFORGLIPRON"})
+    check("semaglutide is a peptide", sema[0], "Peptide")
+    check("orforglipron is a small molecule", orfo[0], "Small molecule")
+    check("both are GLP-1 receptor agonists", sema[1] == orfo[1], True)
+
+    # A kinase inhibitor must not read as a format gap: the series has 14 small
+    # molecules, four of them kinase inhibitors.
+    report = {"live": True, "coverage": cov, "targets": tcov,
+              "gap_categories": set(config.GAP_CATEGORIES)}
+    hit, tier, why = gaps.is_gap({"ingredient": "zanubrutinib",
+                                  "ingredient_raw": "ZANUBRUTINIB"}, report)
+    check("a kinase inhibitor is not a modality gap", tier != "modality", True)
+    check("and the reason quotes the rolled-up count",
+          "Small molecule: 14" in why or tier == "target", True)
+
+    check("modality() still returns a 2-tuple for old callers",
+          len(classify.modality({"ingredient": "zanubrutinib"})), 2)
+
+    # A Purple Book record keeps only the first word in `ingredient`, so a stem
+    # carried by the second word used to be invisible and every -leucel cell
+    # therapy fell through to the fallback. CBER products are the cell, gene and
+    # vaccine gaps, so that was the worst place to lose the stem table.
+    tecelra = {"ingredient": "afamitresgene",
+               "ingredient_raw": "afamitresgene autoleucel",
+               "brand": "tecelra", "center": "CBER",
+               "appl_type": "BLA", "appl_no": "125789"}
+    check("a second-word stem is seen", classify.classify_modality(tecelra)[0],
+          "Engineered cell therapy")
+    check("and it keeps its cell & gene gap category",
+          classify.classify_modality(tecelra)[2], "Cell & gene therapy")
+    # -leucel is the WHO stem for an autologous T-cell product. CAR specificity
+    # comes from -cabtagene, so calling every -leucel a CAR-T mislabelled this
+    # TCR-T therapy.
+    check("a TCR-T is not called a CAR-T",
+          classify.classify_modality(tecelra)[0] != "CAR-T cell therapy", True)
+    check("a -cabtagene product is still a CAR-T",
+          classify.classify_modality(
+              {"ingredient": "obecabtagene",
+               "ingredient_raw": "Obecabtagene autoleucel"})[0],
+          "CAR-T cell therapy")
+
+    # The fallback. Defaulting everything to small molecule filed a fibrinogen
+    # concentrate as one, and the old CBER branch asserted the named gap
+    # category "Cell & gene therapy" on nothing but the reviewing centre, so
+    # fibrinogen scored +40 as an untouched cell and gene therapy.
+    fib = {"ingredient": "fibrinogen human chmt",
+           "ingredient_raw": "fibrinogen, human-chmt", "center": "CBER",
+           "appl_type": "BLA", "appl_no": "125833"}
+    check("a plasma protein is not a small molecule",
+          classify.classify_modality(fib)[0], "Biologic (unspecified)")
+    check("and CBER alone no longer asserts a cell & gene gap",
+          classify.classify_modality(fib)[2], None)
+    check("an NDA with no stem match is still a small molecule",
+          classify.classify_modality(
+              {"ingredient": "maribavir", "ingredient_raw": "MARIBAVIR",
+               "appl_type": "NDA", "appl_no": "215596"})[0], "Small molecule")
+    check("the unmatched fallback rolls up to nothing",
+          config.modality_chain("Biologic (unspecified)"),
+          ["Biologic (unspecified)"])
+
+
+def test_class_provenance():
+    """Every target class says where it came from, and offline must not fail."""
+    import rxclass
+    section("Target-class provenance")
+    rec = {"ingredient": "teclistamab", "ingredient_raw": "TECLISTAMAB-CQYV"}
+
+    real = rxclass.epc
+    try:
+        rxclass.epc = lambda *a, **k: "Janus Kinase Inhibitor"
+        cls, src = rxclass.target_class(rec, local="Kinase inhibitor")
+        check("FDA class wins over the local table", cls, "Janus Kinase Inhibitor")
+        check("and is labelled as FDA's", src,
+              "FDA established pharmacologic class")
+
+        # No FDA answer: fall back, and say so. A stem guess presented as an FDA
+        # assignment on a sheet people act on is the failure to avoid.
+        rxclass.epc = lambda *a, **k: None
+        cls, src = rxclass.target_class(rec, local="Kinase inhibitor")
+        check("falls back to the stem table", cls, "Kinase inhibitor")
+        check("and says the stem table gave it", src, "INN stem")
+        check("no class at all reports no source",
+              rxclass.target_class(rec, local=None), ("", ""))
+
+        # Network down. RxClass is a nice-to-have; a failed run is not.
+        def boom(*a, **k):
+            raise OSError("no route to host")
+        rxclass.epc = boom
+        check("a failed lookup falls back instead of raising",
+              rxclass.target_class(rec, local="Kinase inhibitor"),
+              ("Kinase inhibitor", "INN stem"))
+        rxclass.epc = real
+        check("a nonsense drug name returns None, not an exception",
+              rxclass.epc("zzzznotadrug", use_cache=False), None)
+    finally:
+        rxclass.epc = real
+
+
+def test_bundle_module_list(tmp):
+    """Every module the engine imports is in the bundle's MODULES list.
+
+    The list is hand-maintained, and a module missing from it does not fail the
+    build. It fails at the moment a user clicks the button that needs it, as an
+    ImportError that only ever appears inside the bundle: rxclass was added and
+    left off, so the hot list worked from source and raised in the .app.
+    """
+    import ast
+    import glob
+    section("Bundle module list is closed under import")
+    here = os.path.dirname(os.path.abspath(__file__))
+    try:
+        import build_single_file
+    except Exception:
+        check("build_single_file not present (running from a bundle), skipped",
+              True, True)
+        return
+    declared = set(build_single_file.MODULES)
+    # The builder itself is a developer tool and is imported only by this test.
+    # Bundling it would ship the build system inside its own output.
+    local = {os.path.splitext(os.path.basename(f))[0]
+             for f in glob.glob(os.path.join(here, "*.py"))} - {"build_single_file"}
+    missing = {}
+    for name in sorted(declared):
+        path = os.path.join(here, name + ".py")
+        if not os.path.exists(path):
+            missing[name] = "declared but no such file"
+            continue
+        tree = ast.parse(open(path).read())
+        for node in ast.walk(tree):
+            mods = []
+            if isinstance(node, ast.Import):
+                mods = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                mods = [(node.module or "").split(".")[0]]
+            for m in mods:
+                if m in local and m not in declared and m != name:
+                    missing.setdefault(m, f"imported by {name}")
+    check("no runtime import is left out of the bundle",
+          sorted(f"{k} ({v})" for k, v in missing.items()), [])
+    check("rxclass specifically is bundled", "rxclass" in declared, True)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="moa-selftest-")
     print(f"Self-test — local file layer. Scratch dir: {tmp}")
@@ -728,6 +927,9 @@ def main():
         test_clinpharm_acquisition_and_drift()
         test_clinpharm_dose_escalation()
         test_sponsor_affiliation_matching()
+        test_modality_axes()
+        test_class_provenance()
+        test_bundle_module_list(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

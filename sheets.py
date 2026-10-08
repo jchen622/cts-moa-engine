@@ -868,7 +868,7 @@ def write_invites(year, rows, columns=None, dry_run=True):
 
 
 # ---------------------------------------------------------------- hot list
-def _hotlist_methodology(report, months, top, considered, shown):
+def _hotlist_methodology(report, months, top, considered, shown, listed=None):
     """Sheet 2. Written so a weight can be argued with, not just trusted."""
     L = lambda *c: list(c)
     rows = [L("How this list was built", "")]
@@ -891,19 +891,44 @@ def _hotlist_methodology(report, months, top, considered, shown):
         L("Published test", "The paper must have a PMC release date. An accepted "
                             "paper assigned to a future issue is not published; this "
                             "is the rule that caught fruquintinib being counted early."),
-        L("Status", report["note"]),
         L("Published papers found", str(report["published"])),
-        L("Modalities covered", ", ".join(f"{k} ({v})" for k, v in
-                                          sorted(report["coverage"].items(),
-                                                 key=lambda kv: -kv[1])) or "-"),
+        L("Two axes", "Molecular format (small molecule, antibody, "
+                      "oligonucleotide) and target class (kinase inhibitor, "
+                      "GLP-1 receptor agonist) are separate questions and are "
+                      "counted separately. They used to be one flat set, which "
+                      "made the counts incomparable: of the published papers, "
+                      "18 were filed by format and 4 by target class."),
+        L("Format counts roll up", "An antibody-drug conjugate is an antibody; a "
+                                   "kinase inhibitor is a small molecule. Each "
+                                   "paper increments every level of its branch. "
+                                   "Without the roll-up small molecule read 10 "
+                                   "when it was 14 and antibody read 3 when it "
+                                   "was 7, so a modality could be called "
+                                   "uncovered that the series had published on "
+                                   "four times."),
+        L("Status", report["note"]),
+        L("Formats covered (rolled up)",
+          ", ".join(f"{k} ({v})" for k, v in
+                    sorted(report["coverage"].items(),
+                           key=lambda kv: -kv[1])) or "-"),
+        L("Target classes covered",
+          ", ".join(f"{k} ({v})" for k, v in
+                    sorted((report.get("targets") or {}).items(),
+                           key=lambda kv: -kv[1])) or "-"),
         L("Open gaps", ", ".join(sorted(report["gap_categories"])) or "none"),
         L("Important", "A gap is purely a mechanism the series has not covered. "
                        "Whether a contact is already known is NOT part of the test, "
                        "because finding those contacts is the point of the sheet."),
         L("", ""),
         L("2. HOT SCORE  (decides the order only)", ""),
-        L("Interesting mechanism", "never-published modality +40; first approval of "
-                                   "this moiety +20; known moiety by a new route +8"),
+        L("Interesting mechanism", "named coverage gap still open +40; "
+                                   "unpublished molecular format +12; "
+                                   "unpublished target class +8; first approval "
+                                   "of this moiety +20; known moiety by a new "
+                                   "route +8. The three gap tiers are "
+                                   "exclusive, strongest first: a flat test let "
+                                   "'MRI contrast agent' outrank a real CAR-T "
+                                   "gap the team had named."),
         L("News-worthy", "FDA priority review +12; orphan designation +8. Both come "
                          "from the Drugs@FDA bulk files (Submissions.ReviewPriority "
                          "and SubmissionPropertyType)."),
@@ -947,6 +972,24 @@ def _hotlist_methodology(report, months, top, considered, shown):
         L("Priority block", f"top {top} by hot score, highlighted on sheet 1"),
         L("Generated", datetime.date.today().isoformat()),
     ]
+    if listed:
+        rows += [
+            L("", ""),
+            L("6. HOW EACH LISTED DRUG WAS CLASSIFIED", ""),
+            L("Class source", "FDA's Established Pharmacologic Class via NLM "
+                              "RxClass where the label carries one, the "
+                              "engine's INN-stem table otherwise. The column "
+                              "says which, because a stem-based guess must not "
+                              "be read as an FDA assignment."),
+            L("Drug", "Format | Target class | Class source | Gap axis"),
+        ]
+        for r in sorted(listed, key=lambda x: -int(x.get("hot_score") or 0)):
+            rows.append(L(
+                r.get("ingredient_raw") or r.get("ingredient", ""),
+                " | ".join([r.get("modality_format", "") or "-",
+                            r.get("target_class", "") or "-",
+                            r.get("class_source", "") or "not classified",
+                            r.get("gap_tier", "") or "added by hand"])))
     return rows
 
 
@@ -1072,7 +1115,8 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
 
     tabs = {HOTLIST_TAB: rows,
             "Methodology": _hotlist_methodology(report, months, top,
-                                                len(records), len(ranked))}
+                                                len(records), len(ranked),
+                                                listed=manual + ranked)}
     store.xlsx_write(path, tabs, highlight={HOTLIST_TAB: highlight},
                      banner={HOTLIST_TAB: banner})
     if verbose:

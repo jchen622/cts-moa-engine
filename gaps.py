@@ -13,9 +13,21 @@ Two rules carry the weight:
 with an October issue while still unreleased, and counting it put a wrong 22 on
 a slide that was about to be presented. The PMC release date is the test.
 
-**A modality bucket with zero published reviews is a gap.** Buckets come from
-`classify.modality()`, the engine's own vocabulary, so the gap list cannot drift
-away from how candidates are tagged. A second hand-maintained list would.
+**A bucket with zero published reviews is a gap, counted on two axes.** Molecular
+format (small molecule, antibody, oligonucleotide) and target class (kinase
+inhibitor, GLP-1 receptor agonist) are different questions and were previously
+one flat set, which made the counts incomparable: 18 of the 22 published papers
+were filed by format and 4 by target class.
+
+Format counts ROLL UP. An antibody-drug conjugate is an antibody and a kinase
+inhibitor is a small molecule, so an ADC increments both of its labels. Before
+the roll-up small molecule read 10 when it was 14 and antibody read 3 when it
+was 7, which let a modality be called uncovered that the series had published on
+four times.
+
+Buckets come from `classify.classify_modality()`, the engine's own vocabulary,
+so the gap list cannot drift away from how candidates are tagged. A second
+hand-maintained list would.
 
 Contact availability is deliberately NOT part of this. A gap is a mechanism the
 series has not covered; whether anyone knows someone at the company is the
@@ -82,15 +94,42 @@ def published_series(force=False):
 
 
 def modality_coverage(force=False):
-    """-> {modality label: count published}, using the engine's own tagger."""
+    """-> {format label: count published}, WITH ROLL-UP.
+
+    An ADC increments both "Antibody-drug conjugate" and "Antibody"; a kinase
+    inhibitor increments "Small molecule". Without the roll-up the counts were
+    wrong in a way that mattered: small molecule read 10 when it was 14, and
+    antibody read 3 when it was 7, so a modality could be called uncovered when
+    the series had published in it four times.
+    """
     if not force and "coverage" in _CACHE:
         return _CACHE["coverage"]
     cov = {}
     for p in published_series(force=force):
-        mod, _gap = classify.modality({"ingredient": p["drug"].lower(),
-                                       "ingredient_raw": p["drug"]})
-        cov[mod] = cov.get(mod, 0) + 1
+        fmt, _t, _g = classify.classify_modality(
+            {"ingredient": p["drug"].lower(), "ingredient_raw": p["drug"]})
+        for label in config.modality_chain(fmt):
+            cov[label] = cov.get(label, 0) + 1
     _CACHE["coverage"] = cov
+    return cov
+
+
+def target_coverage(force=False):
+    """-> {target class: count published}, the second axis.
+
+    Local stem classes only. RxClass is not consulted here: it is one HTTP call
+    per drug and the published set is re-read on every run, so the cost would
+    land on every invocation for a list that changes monthly.
+    """
+    if not force and "targets" in _CACHE:
+        return _CACHE["targets"]
+    cov = {}
+    for p in published_series(force=force):
+        _f, target, _g = classify.classify_modality(
+            {"ingredient": p["drug"].lower(), "ingredient_raw": p["drug"]})
+        if target:
+            cov[target] = cov.get(target, 0) + 1
+    _CACHE["targets"] = cov
     return cov
 
 
@@ -107,15 +146,16 @@ def gap_report(force=False, verbose=False):
         note = ("gap analysis NOT live: PubMed unreachable, using the pinned list "
                 "in config.GAP_CATEGORIES")
         print("  " + note, file=sys.stderr)
-        return {"live": False, "published": 0, "coverage": {},
+        return {"live": False, "published": 0, "coverage": {}, "targets": {},
                 "gap_mods": set(), "gap_categories": set(config.GAP_CATEGORIES),
                 "note": note}
 
     cov = modality_coverage(force=force)
+    tcov = target_coverage(force=force)
     covered_cats, covered_mods = set(), set(cov)
     for p in papers:
-        _mod, gap = classify.modality({"ingredient": p["drug"].lower(),
-                                       "ingredient_raw": p["drug"]})
+        _f, _t, gap = classify.classify_modality(
+            {"ingredient": p["drug"].lower(), "ingredient_raw": p["drug"]})
         if gap:
             covered_cats.add(gap)
     gap_cats = set(config.GAP_CATEGORIES) - covered_cats
@@ -127,7 +167,8 @@ def gap_report(force=False, verbose=False):
             print(f"    {n:>3}  {m}")
         print(f"    gaps: {', '.join(sorted(gap_cats)) or 'none'}")
     return {"live": True, "published": len(papers), "coverage": cov,
-            "gap_mods": covered_mods, "gap_categories": gap_cats, "note": note}
+            "targets": tcov, "gap_mods": covered_mods,
+            "gap_categories": gap_cats, "note": note}
 
 
 def is_gap(rec, report):
@@ -141,27 +182,41 @@ def is_gap(rec, report):
     outranked obecabtagene, an actual CAR-T gap the team named on slide 4.
 
         "category"  one of the named coverage gaps, still open
-        "modality"  any other mechanism class with nothing published
+        "modality"  a molecular format with nothing published in the branch
+        "target"    a pharmacologic class with nothing published
 
     A drug in a covered mechanism is still a candidate, just not gap-filling,
     so the reason is written out either way.
     """
-    mod, gap_cat = classify.modality(rec)
+    fmt, target, gap_cat = classify.classify_modality(rec)
 
-    # The gap CATEGORY decides, not the fine modality label. Those differ in
-    # granularity: olezarsen tags as "Antisense oligonucleotide" while the
-    # published imetelstat tags as "Oligonucleotide", so comparing fine labels
-    # called siRNA / ASO an untouched gap when the series had covered it.
+    # The named gap CATEGORY decides first. Fine labels differ in granularity:
+    # olezarsen is "Antisense oligonucleotide" while the published imetelstat is
+    # "Oligonucleotide", so comparing those called siRNA / ASO an untouched gap
+    # when the series had covered it. The category is the stable comparison.
     if gap_cat:
         if gap_cat in report["gap_categories"]:
             return True, "category", f"{gap_cat} - a named coverage gap"
         return False, "", f"{gap_cat}: already covered by the series"
 
-    # No gap category, so fall back to the fine label. Real, but a weaker claim.
-    if report["live"] and mod not in report["coverage"]:
+    # Format axis, after roll-up. Nothing anywhere in this branch means a real
+    # format gap; a parent with coverage means the branch is represented.
+    chain = config.modality_chain(fmt)
+    if report["live"] and not any(report["coverage"].get(c) for c in chain):
         first = "first approval of this moiety" in (
             rec.get("novelty_reason") or rec.get("Novelty") or "").lower()
-        why = f"{mod} - nothing published in this mechanism class"
+        why = f"{fmt} - no published review of this modality"
         return True, "modality", (why + "; first-in-class" if first else why)
-    n = report["coverage"].get(mod, 0)
-    return False, "", f"{mod}: {n} published"
+
+    # Target-class axis, independent of format. A well-covered format can still
+    # hide an unexamined mechanism: the series has eleven small molecules and
+    # no aldosterone synthase inhibitor.
+    if target and report["live"] and not report.get("targets", {}).get(target):
+        return True, "target", f"{target} - no published review of this target class"
+
+    nf = next((report["coverage"].get(c) for c in chain
+               if report["coverage"].get(c)), 0)
+    bits = [f"{fmt}: {nf} published"]
+    if target:
+        bits.append(f"{target}: {report.get('targets', {}).get(target, 0)}")
+    return False, "", "; ".join(bits)

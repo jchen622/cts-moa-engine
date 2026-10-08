@@ -9,26 +9,81 @@ import re
 import config
 
 
-def modality(rec):
-    """Best guess at modality from the proper name, INN stem and dosage route."""
+def classify_modality(rec):
+    """-> (format, target_class, gap_category).
+
+    Two axes, kept apart. They used to be one flat label, which made the
+    coverage counts incomparable: a kinase inhibitor was not counted as a small
+    molecule and an ADC was not counted as an antibody.
+
+    `format` is the molecular format and rolls up via config.modality_chain().
+    `target_class` is the pharmacologic class and may be None, in which case
+    rxclass.epc() is the better source and the caller should try it.
+    """
     name = " ".join([rec.get("ingredient_raw", ""), rec.get("brand", "")]).lower()
 
-    for kw, label, gap in config.MODALITY_KEYWORDS:
+    for kw, fmt, target, gap in config.MODALITY_KEYWORDS:
         if kw in name:
-            return label, gap
+            return fmt, target, gap
 
-    stem_src = rec.get("ingredient", "")
+    # Both the normalised ingredient AND the raw one. Purple Book records keep
+    # only the first word in `ingredient` ("afamitresgene"), so a stem carried
+    # by the second word was invisible: every -leucel cell therapy fell through
+    # to the fallback below. That is the opposite of where the stem table is
+    # most needed, since CBER products are the cell, gene and vaccine gaps.
+    stem_src = " ".join([rec.get("ingredient", "") or "",
+                         (rec.get("ingredient_raw", "") or "").lower()])
     best = None
-    for stem, label, gap in config.MODALITY_STEMS:
+    for stem, fmt, target, gap in config.MODALITY_STEMS:
         if re.search(stem + r"\b", stem_src) or stem_src.endswith(stem):
             if best is None or len(stem) > len(best[0]):
-                best = (stem, label, gap)
+                best = (stem, fmt, target, gap)
     if best:
-        return best[1], best[2]
+        return best[1], best[2], best[3]
+    return _fallback_format(rec, name), None, None
 
-    if rec.get("center") == "CBER":
-        return "Biologic (CBER)", "Cell & gene therapy"
-    return "Small molecule", None
+
+# Names that are biologics on their face, for the one case where the record
+# carries no application number to decide it.
+_BIOLOGIC_NAME = re.compile(
+    r"(leucel|autotemcel|parvovec|vaccine|toxoid|globulin|allograft|autologous|"
+    r"allogeneic|recombinant|\bcells?\b|\bhuman\b|\bplasma\b|\balfa\b|"
+    r"\bbeta\b|\bgamma\b|tissue)")
+
+
+def _fallback_format(rec, name):
+    """The format when no stem and no keyword matched.
+
+    Defaulting everything to "Small molecule" was wrong in both directions. It
+    filed a fibrinogen concentrate and an acellular nerve allograft as small
+    molecules, and every one of those inflated the small-molecule count that the
+    gap test reads. The old CBER branch was worse: it asserted the named gap
+    category "Cell & gene therapy" on nothing but the reviewing centre, so
+    fibrinogen scored +40 as an untouched cell and gene therapy.
+
+    The regulatory route is the authoritative answer and it is already on the
+    record: an NDA is a small molecule, a BLA is a biologic. Only when there is
+    no application number at all, as when a bare drug name is passed in from a
+    PubMed title, does the shape of the name decide.
+    """
+    appl = (rec.get("appl_type") or "").upper()
+    no = (rec.get("appl_no") or "").strip()
+    if rec.get("center") == "CBER" or appl == "BLA" or no.startswith(("125", "761")):
+        return "Biologic (unspecified)"
+    if appl in ("NDA", "ANDA") or no:
+        return "Small molecule"
+    return ("Biologic (unspecified)" if _BIOLOGIC_NAME.search(name)
+            else "Small molecule")
+
+
+def modality(rec):
+    """Back-compatible two-tuple: (format, gap_category).
+
+    Kept because gaps.py and sheets.py call it in several places; new code
+    should use classify_modality() and get the target class too.
+    """
+    fmt, _target, gap = classify_modality(rec)
+    return fmt, gap
 
 
 def gap_flag(rec, gap):
@@ -61,7 +116,14 @@ def hot_score(rec, gap_tier, gap_reason, attention):
         why.append(f"named coverage gap (+40) [{gap_reason}]")
     elif gap_tier == "modality":
         score += 12
-        why.append(f"no review in this mechanism class (+12) [{gap_reason}]")
+        why.append(f"no review of this modality (+12) [{gap_reason}]")
+    elif gap_tier == "target":
+        # Weakest of the three. A format the series has covered repeatedly can
+        # still hide an unexamined target class, which is worth surfacing but
+        # says less than an untouched modality: there are far more target
+        # classes than formats, so nearly everything is a gap on this axis.
+        score += 8
+        why.append(f"no review of this target class (+8) [{gap_reason}]")
     nov = (rec.get("novelty_reason") or rec.get("Novelty") or "")
     if "first approval of this moiety" in nov.lower():
         score += 20

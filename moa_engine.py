@@ -324,6 +324,7 @@ def cmd_hotlist(args):
     """
     import gaps
     import labels
+    import rxclass
 
     months = args.months
     since = (datetime.date.today()
@@ -364,8 +365,18 @@ def cmd_hotlist(args):
         lab = labels.label_facts(drug, brand=brand)
         att = enrich.attention(drug, brand)
         score, terms = classify.hot_score(rec, tier, why, att)
+        # Classification for the methodology sheet. FDA's Established
+        # Pharmacologic Class where it exists, the local stem table otherwise,
+        # and the row says which. Looked up only for rows that survived the gap
+        # test, so this is one extra request per kept drug rather than per
+        # candidate. Note the GAP TEST above deliberately used the local class:
+        # coverage is counted with the local vocabulary, so comparing an FDA
+        # string against it would call every drug a gap.
+        fmt, local_target, _gc = classify.classify_modality(rec)
+        tclass, tsource = rxclass.target_class(rec, local=local_target)
         r = dict(rec)
-        r.update(gap_reason=why, gap_tier=tier, hot_score=score,
+        r.update(modality_format=fmt, target_class=tclass, class_source=tsource,
+                 gap_reason=why, gap_tier=tier, hot_score=score,
                  hot_reasons="; ".join(terms),
                  moa=lab["moa"], indications=lab["indications"],
                  papers_24m=att["papers_24m"], trials=att["trials"])

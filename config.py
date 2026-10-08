@@ -406,77 +406,148 @@ GAP_CATEGORIES = [
 # "-mab" ending with -tug (unmodified immunoglobulin), -bart (artificial),
 # -mig (multi-specific) and -ment (fragment). Without these, current approvals
 # such as veligrotug get misfiled as small molecules.
+# --------------------------------------------------------------- two axes
+# The labels used to be ONE flat set mixing molecular format ("Small molecule"),
+# target class ("Kinase inhibitor") and antibody provenance ("(humanised)").
+# Measured on the 22 published papers, 18 were classified by format and 4 by
+# target class, so the coverage counts were not comparable quantities. The two
+# visible consequences: kinase inhibitors were excluded from small molecules
+# (10 reported, 14 actual) and ADCs and bispecifics from antibodies (3 reported,
+# 7 actual), either of which can call a modality uncovered when the series has
+# published in it repeatedly.
+#
+# MODALITY_PARENT is child -> parent for the FORMAT axis only. Roll-up is the
+# point: "has the series covered antibodies?" must count an ADC, while "has it
+# covered ADCs?" must not count a naked antibody.
+MODALITY_PARENT = {
+    # antibodies and antibody-derived formats
+    "Monoclonal antibody":        "Antibody",
+    "Antibody-drug conjugate":    "Antibody",
+    "Bispecific antibody":        "Antibody",
+    "Bispecific T-cell engager":  "Bispecific antibody",
+    "T-cell engager":             "Bispecific antibody",
+    "Multispecific immunoglobulin": "Bispecific antibody",
+    "Antibody fragment":          "Antibody",
+    "Engineered antibody":        "Antibody",
+    # nucleic acids
+    "Antisense oligonucleotide":  "Oligonucleotide",
+    "siRNA":                      "Oligonucleotide",
+    # proteins that are not antibodies
+    "Enzyme":                     "Protein (non-antibody)",
+    "Enzyme replacement":         "Protein (non-antibody)",
+    "Fusion protein":             "Protein (non-antibody)",
+    "Fc-fusion protein":          "Fusion protein",
+    "Insulin analogue":           "Peptide",
+    "PEGylated peptide":          "Peptide",
+    "Natriuretic peptide":        "Peptide",
+    "Entry-inhibitor peptide":    "Peptide",
+    # cells and genes
+    "CAR-T cell therapy":         "Cell therapy",
+    "Engineered cell therapy":    "Cell therapy",
+    "Gene therapy (AAV)":         "Gene therapy",
+    "Gene therapy (viral vector)": "Gene therapy",
+    # imaging
+    "PET imaging agent":          "Imaging agent",
+    "MRI contrast agent":         "Imaging agent",
+}
+
+# The format axis, in full. Anything not here is a target class, never a format.
+MODALITY_FORMATS = set(MODALITY_PARENT) | {
+    "Small molecule", "Peptide", "Oligonucleotide", "Antibody",
+    "Protein (non-antibody)", "Cell therapy", "Gene therapy", "Vaccine",
+    "Radioligand therapy", "Imaging agent", "Conjugate",
+    # The fallback when no stem or keyword matches. A declared root with no
+    # parent, so it rolls up to nothing and reads as uncovered rather than
+    # borrowing the small-molecule count.
+    "Biologic (unspecified)",
+}
+
+
+def modality_chain(label):
+    """A format label plus every parent above it, most specific first.
+
+    Used for roll-up, so one published ADC registers as coverage of ADCs AND of
+    antibodies, without a naked antibody counting as coverage of ADCs.
+    """
+    out, seen = [], set()
+    while label and label not in seen:
+        out.append(label)
+        seen.add(label)
+        label = MODALITY_PARENT.get(label)
+    return out
+
+
 MODALITY_STEMS = [
-    # cell and gene therapy
-    ("cabtagene",  "CAR-T cell therapy",            "CAR-T"),
-    ("leucel",     "CAR-T cell therapy",            "CAR-T"),
-    ("tocel",      "Engineered cell therapy",       "Cell & gene therapy"),
-    ("temcel",     "Cell therapy",                  "Cell & gene therapy"),
-    ("keracel",    "Cell therapy",                  "Cell & gene therapy"),
-    ("parvovec",   "Gene therapy (AAV)",            "Cell & gene therapy"),
-    ("abeparvovec", "Gene therapy (AAV)",           "Cell & gene therapy"),
-    ("nogene",     "Gene therapy",                  "Cell & gene therapy"),
-    ("vec",        "Gene therapy (viral vector)",   "Cell & gene therapy"),
-    # oligonucleotides
-    ("siran",      "siRNA",                         "siRNA / ASO"),
-    # Imetelstat has no oligonucleotide stem -- its INN predates the convention
-    # -- so without an explicit entry it tags as a small molecule. That made
-    # "siRNA / ASO" read as an untouched gap even though the series published
-    # imetelstat in Nov 2024, which would send the team chasing covered ground.
-    ("telstat",    "Oligonucleotide",               "siRNA / ASO"),
-    ("rsen",       "Antisense oligonucleotide",     "siRNA / ASO"),
-    ("mersen",     "Antisense oligonucleotide",     "siRNA / ASO"),
-    ("nusinersen", "Antisense oligonucleotide",     "siRNA / ASO"),
-    # antibodies and antibody-like
-    ("tamab",      "Bispecific T-cell engager",     None),
-    ("bamab",      "Bispecific antibody",           None),
-    ("ximab",      "Monoclonal antibody (chimeric)", None),
-    ("zumab",      "Monoclonal antibody (humanised)", None),
-    ("umab",       "Monoclonal antibody (human)",   None),
-    ("mab",        "Monoclonal antibody",           None),
-    ("tug",        "Monoclonal antibody",           None),
-    ("bart",       "Engineered antibody",           None),
-    ("mig",        "Multispecific immunoglobulin",  None),
-    ("ment",       "Antibody fragment",             None),
-    # fusion proteins and peptides
-    ("fusp",       "Fusion protein",                None),
-    ("bcept",      "Fc-fusion protein",             None),
-    ("cept",       "Fusion protein",                None),
-    ("glipron",    "Oral GLP-1 receptor agonist",   "Incretins & cardiometabolic"),
-    ("glutide",    "GLP-1 receptor agonist",        "Incretins & cardiometabolic"),
-    ("gliptin",    "DPP-4 inhibitor",               "Incretins & cardiometabolic"),
-    ("flozin",     "SGLT2 inhibitor",               "Incretins & cardiometabolic"),
-    ("pegritide",  "PEGylated peptide",             None),
-    ("ritide",     "Natriuretic peptide",           None),
-    ("virtide",    "Entry-inhibitor peptide",       None),
-    ("tide",       "Peptide",                       None),
-    ("insulin",    "Insulin analogue",              "Incretins & cardiometabolic"),
-    ("arginase",   "Enzyme replacement",            None),
-    ("ase",        "Enzyme",                        None),
-    # small molecules, by target class
-    ("degrastrant", "Targeted protein degrader",    None),
-    ("gestrant",   "Targeted protein degrader",     None),
-    ("domide",     "Cereblon E3 ligase modulator",  None),
-    ("toclax",     "BCL-2 inhibitor",               None),
-    ("trelvir",    "Viral protease inhibitor",      None),
-    ("previr",     "Viral protease inhibitor",      None),
-    ("ciclib",     "CDK inhibitor",                 None),
-    ("parib",      "PARP inhibitor",                None),
-    ("lisib",      "PI3K/mTOR inhibitor",           None),
-    ("tinib",      "Kinase inhibitor",              None),
-    ("ostat",      "HDAC inhibitor",                None),
-    ("drostat",    "Aldosterone synthase inhibitor", None),
-    ("penem",      "Carbapenem antibacterial",      None),
-    ("bactam",     "Beta-lactamase inhibitor",      None),
-    ("xibat",      "IBAT inhibitor",                None),
-    ("corilant",   "Glucocorticoid receptor modulator", None),
-    ("orexton",    "Orexin receptor agonist",       None),
-    ("fadine",     "Monoamine reuptake inhibitor",  None),
-    ("milast",     "PDE4 inhibitor",                None),
-    ("peridone",   "Atypical antipsychotic",        None),
-    ("profol",     "GABA-A anaesthetic",            None),
-    ("pofol",      "GABA-A anaesthetic",            None),
-    ("vastatin",   "Statin",                        None),
+    # --- cell and gene therapy
+    ("cabtagene",  "CAR-T cell therapy",          None, "CAR-T"),
+    ("leucel",     "Engineered cell therapy", None, "Cell & gene therapy"),
+    ("tocel",      "Engineered cell therapy",     None, "Cell & gene therapy"),
+    ("temcel",     "Cell therapy",                None, "Cell & gene therapy"),
+    ("keracel",    "Cell therapy",                None, "Cell & gene therapy"),
+    ("parvovec",   "Gene therapy (AAV)",          None, "Cell & gene therapy"),
+    ("abeparvovec", "Gene therapy (AAV)",         None, "Cell & gene therapy"),
+    ("nogene",     "Gene therapy",                None, "Cell & gene therapy"),
+    ("vec",        "Gene therapy (viral vector)", None, "Cell & gene therapy"),
+    # --- oligonucleotides
+    ("siran",      "siRNA",                     "RNA interference",      "siRNA / ASO"),
+    ("telstat",    "Oligonucleotide",           "Telomerase inhibitor",  "siRNA / ASO"),
+    ("rsen",       "Antisense oligonucleotide", None,                    "siRNA / ASO"),
+    ("mersen",     "Antisense oligonucleotide", None,                    "siRNA / ASO"),
+    ("nusinersen", "Antisense oligonucleotide", None,                    "siRNA / ASO"),
+    # --- antibodies. The 2021 WHO stems replaced -mab for new antibodies.
+    # Humanisation is NOT a modality: -ximab/-zumab/-umab all collapse to
+    # Monoclonal antibody, because splitting three antibodies across three
+    # labels is what made antibody coverage read 1+1+1 instead of 3.
+    ("tamab",      "Bispecific T-cell engager",  None, None),
+    ("bamab",      "Bispecific antibody",        None, None),
+    ("ximab",      "Monoclonal antibody",        None, None),
+    ("zumab",      "Monoclonal antibody",        None, None),
+    ("umab",       "Monoclonal antibody",        None, None),
+    ("mab",        "Monoclonal antibody",        None, None),
+    ("tug",        "Monoclonal antibody",        None, None),
+    ("bart",       "Engineered antibody",        None, None),
+    ("mig",        "Multispecific immunoglobulin", None, None),
+    ("ment",       "Antibody fragment",          None, None),
+    # --- other proteins
+    ("fusp",       "Fusion protein",             None, None),
+    ("bcept",      "Fc-fusion protein",          None, None),
+    ("cept",       "Fusion protein",             None, None),
+    ("arginase",   "Enzyme replacement",         None, None),
+    ("ase",        "Enzyme",                     None, None),
+    # --- peptides and incretins. Note the two GLP-1 formats.
+    ("glipron",    "Small molecule", "GLP-1 receptor agonist",  "Incretins & cardiometabolic"),
+    ("glutide",    "Peptide",        "GLP-1 receptor agonist",  "Incretins & cardiometabolic"),
+    ("pegritide",  "PEGylated peptide",   None,                 None),
+    ("ritide",     "Natriuretic peptide", None,                 None),
+    ("virtide",    "Peptide",        "Viral entry inhibitor",   None),
+    ("tide",       "Peptide",        None,                      None),
+    ("insulin",    "Insulin analogue", None,  "Incretins & cardiometabolic"),
+    # --- small molecules, with their target class kept separate
+    ("gliptin",    "Small molecule", "DPP-4 inhibitor",   "Incretins & cardiometabolic"),
+    ("flozin",     "Small molecule", "SGLT2 inhibitor",   "Incretins & cardiometabolic"),
+    ("degrastrant", "Small molecule", "Targeted protein degrader", None),
+    ("gestrant",   "Small molecule", "Targeted protein degrader", None),
+    ("domide",     "Small molecule", "Cereblon E3 ligase modulator", None),
+    ("toclax",     "Small molecule", "BCL-2 inhibitor",   None),
+    ("trelvir",    "Small molecule", "Viral protease inhibitor", None),
+    ("previr",     "Small molecule", "Viral protease inhibitor", None),
+    ("ciclib",     "Small molecule", "CDK inhibitor",     None),
+    ("parib",      "Small molecule", "PARP inhibitor",    None),
+    ("lisib",      "Small molecule", "PI3K/mTOR inhibitor", None),
+    ("tinib",      "Small molecule", "Kinase inhibitor",  None),
+    ("ostat",      "Small molecule", "HDAC inhibitor",    None),
+    ("drostat",    "Small molecule", "Aldosterone synthase inhibitor", None),
+    ("penem",      "Small molecule", "Carbapenem antibacterial", None),
+    ("bactam",     "Small molecule", "Beta-lactamase inhibitor", None),
+    ("xibat",      "Small molecule", "IBAT inhibitor",    None),
+    ("corilant",   "Small molecule", "Glucocorticoid receptor modulator", None),
+    ("orexton",    "Small molecule", "Orexin receptor agonist", None),
+    ("fadine",     "Small molecule", "Monoamine reuptake inhibitor", None),
+    ("milast",     "Small molecule", "PDE4 inhibitor",    None),
+    ("peridone",   "Small molecule", "Atypical antipsychotic", None),
+    ("profol",     "Small molecule", "GABA-A anaesthetic", None),
+    ("pofol",      "Small molecule", "GABA-A anaesthetic", None),
+    ("vastatin",   "Small molecule", "HMG-CoA reductase inhibitor", None),
 ]
 
 # Modalities that are intrinsically harder to explain and therefore make
@@ -496,29 +567,27 @@ DIAGNOSTIC_MODALITIES = {"MRI contrast agent", "PET imaging agent"}
 
 # Words in the proper/brand name that override or refine the stem guess.
 MODALITY_KEYWORDS = [
-    ("antibody-drug conjugate", "Antibody-drug conjugate", None),
-    # ADC payload suffixes. Without these an ADC tags on its antibody stem
-    # alone, so mirvetuximab soravtansine counted as a plain chimeric mAb.
-    ("soravtansine",            "Antibody-drug conjugate", None),
-    ("mertansine",              "Antibody-drug conjugate", None),
-    ("deruxtecan",              "Antibody-drug conjugate", None),
-    ("vedotin",                 "Antibody-drug conjugate", None),
-    ("govitecan",               "Antibody-drug conjugate", None),
-    ("ozogamicin",              "Antibody-drug conjugate", None),
-    ("tirumotecan",             "Antibody-drug conjugate", None),
-    ("conjugate",               "Conjugate",               None),
-    ("engager",                 "T-cell engager",          None),
-    ("chimeric antigen",        "CAR-T cell therapy",      "CAR-T"),
-    ("vaccine",                 "Vaccine",                 "Vaccines"),
-    ("keratinocyte",            "Cell therapy",            "Cell & gene therapy"),
-    ("fibroblast",              "Cell therapy",            "Cell & gene therapy"),
-    ("cultured",                "Cell therapy",            "Cell & gene therapy"),
-    ("f 18",                    "PET imaging agent",       None),
-    ("f18",                     "PET imaging agent",       None),
-    ("lutetium",                "Radioligand therapy",     "Radioligand therapy"),
-    ("actinium",                "Radioligand therapy",     "Radioligand therapy"),
-    ("gadolinium",              "MRI contrast agent",      None),
-    ("gado",                    "MRI contrast agent",      None),
+    ("antibody-drug conjugate", "Antibody-drug conjugate", None, None),
+    ("soravtansine",            "Antibody-drug conjugate", None, None),
+    ("mertansine",              "Antibody-drug conjugate", None, None),
+    ("deruxtecan",              "Antibody-drug conjugate", None, None),
+    ("vedotin",                 "Antibody-drug conjugate", None, None),
+    ("govitecan",               "Antibody-drug conjugate", None, None),
+    ("ozogamicin",              "Antibody-drug conjugate", None, None),
+    ("tirumotecan",             "Antibody-drug conjugate", None, None),
+    ("conjugate",               "Conjugate",               None, None),
+    ("engager",                 "Bispecific T-cell engager", None, None),
+    ("chimeric antigen",        "CAR-T cell therapy",      None, "CAR-T"),
+    ("vaccine",                 "Vaccine",                 None, "Vaccines"),
+    ("keratinocyte",            "Cell therapy",            None, "Cell & gene therapy"),
+    ("fibroblast",              "Cell therapy",            None, "Cell & gene therapy"),
+    ("cultured",                "Cell therapy",            None, "Cell & gene therapy"),
+    ("f 18",                    "PET imaging agent",       None, None),
+    ("f18",                     "PET imaging agent",       None, None),
+    ("lutetium",                "Radioligand therapy",     None, "Radioligand therapy"),
+    ("actinium",                "Radioligand therapy",     None, "Radioligand therapy"),
+    ("gadolinium",              "MRI contrast agent",      None, None),
+    ("gado",                    "MRI contrast agent",      None, None),
 ]
 
 # Company-name noise stripped before fuzzy-matching sponsors to the contact grid.
