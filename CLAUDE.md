@@ -23,10 +23,11 @@ python3 moa_engine.py check                      # verify files + FDA + PubMed. 
 python3 moa_engine.py scan --days 120            # preview ranked candidates. Writes nothing.
 python3 moa_engine.py update --go                # append new candidates to the queue workbook
 python3 moa_engine.py dossier --year 2027 --go   # build the dossier workbook
+python3 moa_engine.py hotlist --go              # which companies we need contacts at
 python3 moa_engine.py roster  --file X.xlsx --go # import a programme or attendee list (optional)
 python3 moa_engine.py invites --year 2027 --go   # draft letters FROM the dossier
 
-python3 backtest.py                     # the filter's test suite — must stay 18/19
+python3 backtest.py                     # the filter's test suite — must stay 21/22
 python3 selftest.py                     # the file layer's test suite — offline, <1s
 python3 gui.py                          # the browser app, against the live source
 python3 build_single_file.py            # rebuild the two files in SEND THIS/
@@ -39,9 +40,11 @@ enrichment and makes `scan`/`update` roughly 10x faster for iterating on filter 
 
 ### Two test suites, two triggers
 
-- **`backtest.py`** re-scans every FDA approval since 2015 and asks whether the 19
-  already-published MOA drugs survive the filter. Currently **18/19**; the expected miss is
-  molnupiravir (EUA-only, never in Drugs@FDA). Run after any change to `sources.py` or
+- **`backtest.py`** re-scans every FDA approval since 2015 and asks whether the 22
+  already-published MOA drugs survive the filter. Currently **21/22**; the expected miss is
+  molnupiravir (EUA-only, never in Drugs@FDA). The labelled set in
+  `config.PUBLISHED_MOA_DRUGS` is pinned so this gate is reproducible offline; it is NOT
+  what the live gap analysis reads. Run after any change to `sources.py` or
   `config.py`. A filter that rejects drugs the series published is not ready. Takes minutes.
 - **`selftest.py`** covers the `.xlsx` reader/writer and the annotation merge. Offline,
   tempdir-only, under a second. Run after any change to `store.py` or `sheets.py`.
@@ -272,3 +275,36 @@ gitignored, and `settings.example.json` is the template. `MOA_SETTINGS` override
 which is the clean way to run against a scratch config.
 
 Nothing is machine-specific and there is no server, no shared credential and no account.
+
+
+## The hot list, and why the gap analysis is live
+
+`hotlist` answers a different question from `dossier`. The dossier is for **approaching**
+people; the hot list is for **finding** them, so its `Clin pharm contact` column ships empty
+and the engine never writes to it. Pre-filling it with a paper's author would be worse than
+blank, because that person is frequently not the right one to approach.
+
+**Inclusion is the gap test alone.** Whether a contact is already known plays no part in it.
+That was an explicit correction from the editorial team, and `is_gap()` must not grow a
+contact check.
+
+**`gaps.py` queries PubMed on every run.** `config.PUBLISHED_MOA_DRUGS` sat at 19 while the
+series had published 22, and `GAP_CATEGORIES` was copied by hand off a slide, so neither can
+drive a current answer. The pinned list survives only as `backtest.py`'s fixture, and
+`GAP_CATEGORIES` only as the offline fallback, which announces itself when used.
+
+Two rules in `gaps.py` carry the weight:
+
+- **A paper with no PMC release date is not published.** Fruquintinib was indexed against a
+  future issue while still unreleased, and counting it put a wrong total on a slide that was
+  about to be presented.
+- **The gap CATEGORY decides, not the fine modality label.** Olezarsen tags as "Antisense
+  oligonucleotide" and the published imetelstat as "Oligonucleotide"; comparing fine labels
+  called siRNA / ASO an open gap when the series had covered it. Gaps are also **tiered**:
+  a named category gap scores +40 and a merely-unpublished mechanism class +12, because a
+  flat test let "MRI contrast agent" outrank an actual CAR-T gap.
+
+`labels.py` reads MOA and indications from the DailyMed SPL. Three traps are pinned there:
+indications can live in nested child sections (Pluvicto), the SPL states them twice (once in
+Highlights), and a child section may be "Limitations of Use" rather than an indication
+(orforglipron has exactly one child and that is what it is).

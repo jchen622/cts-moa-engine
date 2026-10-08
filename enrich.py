@@ -60,6 +60,42 @@ def _esearch(term, retmax=20):
     return res.get("idlist", []), int(res.get("count", 0) or 0)
 
 
+CTGOV = "https://clinicaltrials.gov/api/v2/studies"
+
+
+def attention(drug, brand=""):
+    """How much attention a drug is getting. -> {'papers_24m', 'trials'}
+
+    Two signals, both free and both tested against real candidates:
+
+        papers_24m   PubMed hits in the last 24 months. Discriminates sharply:
+                     fruquintinib 158, olezarsen 97, plozasiran 65,
+                     vipivotide 35, obecabtagene 18.
+        trials       ClinicalTrials.gov interventional studies, as a proxy for
+                     how broadly the drug is being developed.
+
+    FAERS adverse-event counts were tested and deliberately NOT used: they
+    measure accumulated patient exposure, so they rank older drugs highest and
+    say almost nothing about a drug approved in the last three years, which is
+    the only kind this feeds.
+    """
+    d = re.sub(r'["\\]', " ", drug or "").strip()
+    out = {"papers_24m": 0, "trials": 0}
+    if not d:
+        return out
+    yr = time.gmtime().tm_year
+    _ids, n = _esearch(f'"{d}"[Title/Abstract] AND {yr - 2}:{yr}[pdat]', retmax=1)
+    out["papers_24m"] = n
+    try:
+        q = urllib.parse.urlencode({"query.intr": d, "countTotal": "true",
+                                    "pageSize": 1})
+        with urllib.request.urlopen(f"{CTGOV}?{q}", timeout=30) as r:
+            out["trials"] = int(json.load(r).get("totalCount") or 0)
+    except Exception:
+        pass                       # a missing trial count must not fail a run
+    return out
+
+
 def has_moa_review(drug):
     """Is there already a mechanism-of-action review for this drug anywhere?
 

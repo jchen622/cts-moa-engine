@@ -179,6 +179,32 @@ def dossier_name(year):
     return f"MOA author outreach list {year}"
 
 
+# --------------------------------------------------------------- hot list
+# Columns are exactly what the team asked for and nothing else. "Clin pharm
+# contact" ships EMPTY and the engine never writes to it: it is the question
+# being put to the AE team, not an answer the engine offers. Pre-filling it with
+# a paper's author would be worse than blank, because that person is frequently
+# not the right one to approach.
+HOTLIST_COLUMNS = [
+    "Company", "Drug", "MOA", "Indication(s)", "Approval date", "Gap",
+    "Clin pharm contact",
+]
+
+# 36 months, not 12. Measured from the series itself: joining the 21 published
+# reviews to their Drugs@FDA approval dates gives a median approval-to-review
+# lag of 2.8 years (quartiles 2.0 / 2.8 / 4.3), with 25% inside two years and
+# 55% inside three. A 12-month window would catch only the three fastest
+# turnarounds the series has ever managed.
+HOTLIST_MONTHS = 36
+HOTLIST_TOP = 20          # highlighted priority block
+HOTLIST_TOTAL = 50        # rows on the sheet in all, so 30 below the priority block
+
+
+def hotlist_path(today=None):
+    d = (today or datetime.date.today()).isoformat()
+    return os.path.join(output_dir(), f"MOA contact hot list {d}.xlsx")
+
+
 def legacy_dossier_path(year):
     """Where the file used to live, so existing annotations are not orphaned."""
     return os.path.join(output_dir(), f"ASCPT {year} MOA recruiting dossier.xlsx")
@@ -291,15 +317,29 @@ def aliases_for(ingredient):
 # ---------------------------------------------------------------- editorial state
 # The 19 published MOA mini-reviews (Dec 2023 - Aug 2026), by INN.
 # Source: PubMed title-convention search; see the team deck, slide 2.
+# backtest.py's labelled set, and ONLY that. It is pinned rather than fetched
+# so the regression gate is reproducible offline. The live gap analysis does not
+# read it: gaps.published_series() queries PubMed on every run, which is why
+# this list sat at 19 while the series had published 22 without anyone noticing.
+#
+# Refreshed 2026-10-08 from gaps.published_series(): added vericiguat,
+# fruquintinib and xanomeline + trospium chloride.
 PUBLISHED_MOA_DRUGS = {
     "upadacitinib", "maribavir", "teclistamab", "ubrogepant", "risankizumab",
     "atogepant", "molnupiravir", "mobocertinib", "evinacumab", "dupilumab",
     "momelotinib", "imetelstat", "ibrexafungerp", "suzetrigine",
     "mirvetuximab soravtansine", "esketamine", "elranatamab", "talquetamab",
-    "brexanolone",
+    "brexanolone", "vericiguat", "fruquintinib",
+    "xanomeline and trospium chloride",
 }
 
-# Coverage gaps identified on slide 4 of the team deck.
+# Fallback only. gaps.gap_report() derives the open gaps live from what the
+# series has actually published and uses this list solely when PubMed is
+# unreachable, in which case it says so in the output.
+#
+# Originally copied off slide 4 of the team deck. The live analysis now confirms
+# six of these seven and retires "siRNA / ASO", which imetelstat covered in
+# Nov 2024.
 GAP_CATEGORIES = [
     "Cell & gene therapy", "CAR-T", "Radioligand therapy", "siRNA / ASO",
     "Incretins & cardiometabolic", "Vaccines", "AI-derived assets",
@@ -325,6 +365,11 @@ MODALITY_STEMS = [
     ("vec",        "Gene therapy (viral vector)",   "Cell & gene therapy"),
     # oligonucleotides
     ("siran",      "siRNA",                         "siRNA / ASO"),
+    # Imetelstat has no oligonucleotide stem -- its INN predates the convention
+    # -- so without an explicit entry it tags as a small molecule. That made
+    # "siRNA / ASO" read as an untouched gap even though the series published
+    # imetelstat in Nov 2024, which would send the team chasing covered ground.
+    ("telstat",    "Oligonucleotide",               "siRNA / ASO"),
     ("rsen",       "Antisense oligonucleotide",     "siRNA / ASO"),
     ("mersen",     "Antisense oligonucleotide",     "siRNA / ASO"),
     ("nusinersen", "Antisense oligonucleotide",     "siRNA / ASO"),
@@ -398,6 +443,15 @@ DIAGNOSTIC_MODALITIES = {"MRI contrast agent", "PET imaging agent"}
 # Words in the proper/brand name that override or refine the stem guess.
 MODALITY_KEYWORDS = [
     ("antibody-drug conjugate", "Antibody-drug conjugate", None),
+    # ADC payload suffixes. Without these an ADC tags on its antibody stem
+    # alone, so mirvetuximab soravtansine counted as a plain chimeric mAb.
+    ("soravtansine",            "Antibody-drug conjugate", None),
+    ("mertansine",              "Antibody-drug conjugate", None),
+    ("deruxtecan",              "Antibody-drug conjugate", None),
+    ("vedotin",                 "Antibody-drug conjugate", None),
+    ("govitecan",               "Antibody-drug conjugate", None),
+    ("ozogamicin",              "Antibody-drug conjugate", None),
+    ("tirumotecan",             "Antibody-drug conjugate", None),
     ("conjugate",               "Conjugate",               None),
     ("engager",                 "T-cell engager",          None),
     ("chimeric antigen",        "CAR-T cell therapy",      "CAR-T"),

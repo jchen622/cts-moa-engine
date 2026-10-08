@@ -41,6 +41,65 @@ def gap_flag(rec, gap):
     return ""
 
 
+def hot_score(rec, gap_tier, gap_reason, attention):
+    """How worth chasing is this drug? -> (score, [reasons])
+
+    Three families, which are the three things the team named as making a drug
+    "hot": an interesting mechanism, news-worthiness, and attention. Every term
+    is written out as text so a weight can be argued with rather than trusted.
+
+    Ordering only. It does not decide what belongs on the list: that is the gap
+    test, and the gap test does not consider whether a contact exists.
+    """
+    score, why = 0, []
+
+    # --- interesting mechanism. Tiered: a named coverage gap the team has
+    # already agreed matters outranks "no review exists in this mechanism
+    # class", which is true of most things and so says much less.
+    if gap_tier == "category":
+        score += 40
+        why.append(f"named coverage gap (+40) [{gap_reason}]")
+    elif gap_tier == "modality":
+        score += 12
+        why.append(f"no review in this mechanism class (+12) [{gap_reason}]")
+    nov = (rec.get("novelty_reason") or rec.get("Novelty") or "")
+    if "first approval of this moiety" in nov.lower():
+        score += 20
+        why.append("first approval of this moiety (+20)")
+    elif "new route" in nov.lower() or "new brand" in nov.lower():
+        score += 8
+        why.append("known moiety by a new route (+8)")
+
+    # --- news-worthy, from Drugs@FDA review designations
+    if rec.get("priority_review"):
+        score += 12
+        why.append("FDA priority review (+12)")
+    if rec.get("orphan"):
+        score += 8
+        why.append("orphan designation (+8)")
+
+    # --- attention
+    papers = int(attention.get("papers_24m") or 0)
+    if papers >= 100:
+        score += 20; why.append(f"{papers} papers in 24 months (+20)")
+    elif papers >= 40:
+        score += 14; why.append(f"{papers} papers in 24 months (+14)")
+    elif papers >= 15:
+        score += 8;  why.append(f"{papers} papers in 24 months (+8)")
+    elif papers:
+        score += 3;  why.append(f"{papers} papers in 24 months (+3)")
+    else:
+        why.append("no papers found in 24 months (0)")
+    trials = int(attention.get("trials") or 0)
+    if trials >= 20:
+        score += 10; why.append(f"{trials} trials (+10)")
+    elif trials >= 5:
+        score += 6;  why.append(f"{trials} trials (+6)")
+    elif trials:
+        score += 2;  why.append(f"{trials} trials (+2)")
+    return score, why
+
+
 def novelty_score(rec, mod, gap, prior_review):
     """0-100. Higher = more worth chasing for a MOA mini-review.
 

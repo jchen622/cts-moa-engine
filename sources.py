@@ -223,6 +223,19 @@ def drugs_at_fda_nmes(since=None, until=None, verbose=True):
                            _route_from_form(p.get("Form", "")),
                            p.get("DrugName", ""), d)
 
+    # FDA review designations, already in the bulk files but never read until
+    # now. They are the only free, authoritative "is this news-worthy" signal:
+    # PRIORITY means FDA judged it a significant improvement, and Orphan marks a
+    # rare-disease indication. 1,485 original submissions carry PRIORITY and
+    # 3,643 rows carry Orphan.
+    orphan = set()
+    try:
+        for r in tsv("SubmissionPropertyType.txt"):
+            if (r.get("SubmissionPropertyTypeCode") or "").strip().lower() == "orphan":
+                orphan.add(r["ApplNo"])
+    except KeyError:
+        pass                       # the file is optional in older drops
+
     out = []
     for s in subs:
         if s["SubmissionType"] != "ORIG" or s["SubmissionStatus"] != "AP":
@@ -244,12 +257,15 @@ def drugs_at_fda_nmes(since=None, until=None, verbose=True):
             continue
         pl = products.get(s["ApplNo"], [])
         p0 = pl[0] if pl else {}
-        out.append(_rec(
+        rec = _rec(
             s["ApplNo"], "CDER", a.get("SponsorName", ""),
             p0.get("DrugName", ""), p0.get("ActiveIngredient", ""),
             date, code, "Drugs@FDA", a.get("ApplType", ""),
             _route_from_form(p0.get("Form", "")),
-        ))
+        )
+        rec["priority_review"] = (s.get("ReviewPriority") or "").strip().upper() == "PRIORITY"
+        rec["orphan"] = s["ApplNo"] in orphan
+        out.append(rec)
     out.sort(key=lambda r: r["approval_date"])
     if verbose:
         print(f"  Drugs@FDA: {len(out)} NME original approvals"

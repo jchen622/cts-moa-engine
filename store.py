@@ -84,29 +84,41 @@ _ROOT_RELS = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
 </Relationships>"""
 
-# Two fonts (normal, bold) and two cell formats: index 0 plain, index 1 bold on
-# a light grey fill -- the same header treatment the Drive version applied.
+# Two fonts (normal, bold) and four cell formats:
+#   0 plain
+#   1 bold on light grey   -- the header, as the Drive version did it
+#   2 amber fill           -- a highlighted row (the hot list's priority block)
+#   3 bold on amber        -- a banner row inside the data
+# Styles are per-cell in OOXML, so a highlighted row means writing the style on
+# every cell of it; a row-level attribute alone is ignored by Excel.
 _STYLES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="2">
 <font><sz val="11"/><name val="Calibri"/></font>
 <font><b/><sz val="11"/><name val="Calibri"/></font>
 </fonts>
-<fills count="3">
+<fills count="4">
 <fill><patternFill patternType="none"/></fill>
 <fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFE8EEF4"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFFDF0D5"/><bgColor indexed="64"/></patternFill></fill>
 </fills>
 <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="2">
+<cellXfs count="4">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1" applyAlignment="1">
+<alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
 </cellXfs>
 </styleSheet>"""
 
 
-def _sheet_xml(rows, freeze_header=True):
+def _sheet_xml(rows, freeze_header=True, highlight=None, banner=None):
+    """`highlight` and `banner` are sets of 1-based row numbers."""
+    highlight = highlight or set()
+    banner = banner or set()
     out = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
            f'<worksheet xmlns="{MAIN_NS}">']
 
@@ -131,11 +143,24 @@ def _sheet_xml(rows, freeze_header=True):
     for r_i, row in enumerate(rows, 1):
         if not row:
             continue
-        style = ' s="1"' if (freeze_header and r_i == 1) else ""
+        if freeze_header and r_i == 1:
+            style = ' s="1"'
+        elif r_i in banner:
+            style = ' s="3"'
+        elif r_i in highlight:
+            style = ' s="2"'
+        else:
+            style = ""
+        # A styled row must emit its EMPTY cells too, or the fill shows as a
+        # broken band wherever a column happens to be blank. Unstyled rows keep
+        # skipping blanks, which keeps the file small.
+        want_all = bool(style) and r_i != 1
+        width = max(len(x) for x in rows) if want_all else 0
         cells = []
-        for c_i, val in enumerate(row):
+        for c_i in range(width) if want_all else range(len(row)):
+            val = row[c_i] if c_i < len(row) else ""
             v = _clean(val)
-            if v == "":
+            if v == "" and not want_all:
                 continue
             ref = f"{col_letter(c_i)}{r_i}"
             cells.append(f'<c r="{ref}"{style} t="inlineStr">'
@@ -145,7 +170,7 @@ def _sheet_xml(rows, freeze_header=True):
     return "".join(out)
 
 
-def xlsx_write(path, tabs, freeze_header=True):
+def xlsx_write(path, tabs, freeze_header=True, highlight=None, banner=None):
     """Write a workbook. ``tabs`` is an ordered {tab name: list of row lists}.
 
     The whole file is rewritten every time, which is what makes re-runs safe:
@@ -190,7 +215,9 @@ def xlsx_write(path, tabs, freeze_header=True):
         z.writestr("xl/styles.xml", _STYLES)
         for i, n in enumerate(names):
             z.writestr(f"xl/worksheets/sheet{i+1}.xml",
-                       _sheet_xml(tabs[n], freeze_header))
+                       _sheet_xml(tabs[n], freeze_header,
+                                  (highlight or {}).get(n),
+                                  (banner or {}).get(n)))
     os.replace(tmp, path)          # atomic: never leave a half-written workbook
     return path
 

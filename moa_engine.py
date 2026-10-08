@@ -296,6 +296,67 @@ def cmd_update(args):
     return 0
 
 
+def cmd_hotlist(args):
+    """Build the contact hot list: which companies we need clin pharm contacts at.
+
+    This is the output for FINDING contacts, where the dossier is the output for
+    approaching them. So the contact column ships empty: it is the question put
+    to the AE team.
+
+    Inclusion is the gap test alone (a novel mechanism the series has not
+    covered). Whether a contact is already known plays no part in it, which was
+    an explicit correction from the team.
+    """
+    import gaps
+    import labels
+
+    months = args.months
+    since = (datetime.date.today()
+             - datetime.timedelta(days=int(months * 30.44))).isoformat()
+    print(f"Hot list: approvals since {since} ({months} months)")
+
+    report = gaps.gap_report(verbose=True)
+    recs = sources.collect(since=since, verbose=True)
+    print(f"  {len(recs)} novel agents in the window")
+
+    out, considered = [], 0
+    for rec in recs:
+        considered += 1
+        drug = rec.get("ingredient") or rec.get("ingredient_raw") or ""
+        brand = rec.get("brand", "")
+        is_gap, tier, why = gaps.is_gap(rec, report)
+        if not is_gap:
+            continue
+        prior, _detail = enrich.has_moa_review(drug)
+        if prior:
+            continue                      # already written up; nothing to chase
+        lab = labels.label_facts(drug, brand=brand)
+        att = enrich.attention(drug, brand)
+        score, terms = classify.hot_score(rec, tier, why, att)
+        r = dict(rec)
+        r.update(gap_reason=why, gap_tier=tier, hot_score=score,
+                 hot_reasons="; ".join(terms),
+                 moa=lab["moa"], indications=lab["indications"],
+                 papers_24m=att["papers_24m"], trials=att["trials"])
+        out.append(r)
+        if args.verbose:
+            print(f"    {score:>4}  {drug[:28]:28s} {why[:44]}")
+
+    print(f"  {len(out)} gap-filling candidates with no existing review "
+          f"(of {considered} considered)")
+    if not out:
+        print("  nothing to write")
+        return 0
+    if not args.go:
+        for r in sorted(out, key=lambda x: -x["hot_score"])[:args.total or None]:
+            print(f"    {r['hot_score']:>4}  {r.get('sponsor_raw','')[:26]:26s} "
+                  f"{r.get('ingredient_raw','')[:26]}")
+        print("\n  dry run; add --go to write the workbook")
+        return 0
+    sheets.build_hotlist(out, report, months, args.top, total=args.total)
+    return 0
+
+
 def cmd_dossier(args):
     """Build the outreach list: who to contact at each drug's company.
 
@@ -618,6 +679,26 @@ def main(argv=None):
                     help="also fill in contacts for candidates already in the queue")
     sp.add_argument("--go", action="store_true", help="actually write the file")
     sp.set_defaults(fn=cmd_update)
+
+    sp = out_flag(sub.add_parser(
+        "hotlist",
+        help="which companies we need clin pharm contacts at, cross-referenced "
+             "with the series' coverage gaps"))
+    sp.add_argument("--months", type=int, default=config.HOTLIST_MONTHS,
+                    help=f"approvals from the trailing N months "
+                         f"(default {config.HOTLIST_MONTHS}; the median "
+                         f"approval-to-review lag is 2.8 years)")
+    sp.add_argument("--top", type=int, default=config.HOTLIST_TOP,
+                    help=f"size of the highlighted priority block "
+                         f"(default {config.HOTLIST_TOP}; 0 = no cap)")
+    sp.add_argument("--total", type=int, default=config.HOTLIST_TOTAL,
+                    help=f"rows on the sheet in all "
+                         f"(default {config.HOTLIST_TOTAL}: {config.HOTLIST_TOP} "
+                         f"priority plus "
+                         f"{config.HOTLIST_TOTAL - config.HOTLIST_TOP} below)")
+    sp.add_argument("--verbose", action="store_true", help="show each candidate")
+    sp.add_argument("--go", action="store_true", help="actually write the file")
+    sp.set_defaults(fn=cmd_hotlist)
 
     sp = out_flag(sub.add_parser("dossier",
                        help="build the outreach list — who to contact at each company"))

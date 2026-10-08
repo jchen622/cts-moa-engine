@@ -8,6 +8,7 @@ reports recall explicitly rather than burying it.
 
 Run:  python3 backtest.py
 """
+import re
 import sys
 
 import config
@@ -73,8 +74,18 @@ def _find(drug, pool):
     d = drug.lower()
     if d in pool:
         return d
+    # Combination products list their components in whatever order the source
+    # chose. The Cobenfy paper is titled "Xanomeline and Trospium Chloride";
+    # Drugs@FDA holds "TROSPIUM CHLORIDE; XANOMELINE TARTRATE". Comparing the
+    # strings called that a miss when it is the same drug, so compare the sets
+    # of component words instead.
+    stop = {"and", "with", "plus"}
+    dw = {w for w in re.split(r"[^a-z0-9]+", d) if w and w not in stop}
     for p in pool:
         if d in p or p in d:
+            return p
+        pw = {w for w in re.split(r"[^a-z0-9]+", p) if w and w not in stop}
+        if dw and pw and (dw <= pw or pw <= dw):
             return p
         # combination brand names: match on the first word
         if d.split()[0] == p.split()[0]:

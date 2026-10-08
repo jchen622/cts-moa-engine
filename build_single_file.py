@@ -28,7 +28,8 @@ DIST = os.path.join(HERE, "SEND THIS")
 # Runtime modules only. The build scripts and the icon generator are developer
 # tools and would just make the download bigger.
 MODULES = ["config", "store", "sheets", "sources", "classify", "authors",
-           "enrich", "scheduler", "gui", "moa_engine", "backtest", "selftest"]
+           "enrich", "gaps", "labels", "scheduler", "gui", "moa_engine",
+           "backtest", "selftest"]
 
 # Small starter files. Deliberately NOT the ASCPT programme export: that is a
 # colleague's data and a point-in-time snapshot, not ours to redistribute.

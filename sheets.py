@@ -16,6 +16,7 @@ import os
 import re
 
 import config
+import gaps
 import store
 
 
@@ -880,4 +881,151 @@ def write_invites(year, rows, columns=None, dry_run=True):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(build_invites_html(rows, year, columns))
+    return path
+
+
+# ---------------------------------------------------------------- hot list
+def _hotlist_methodology(report, months, top, considered, shown):
+    """Sheet 2. Written so a weight can be argued with, not just trusted."""
+    L = lambda *c: list(c)
+    rows = [L("How this list was built", "")]
+    rows += [
+        L("", ""),
+        L("WHAT THE LIST IS", ""),
+        L("Purpose", "Find clinical pharmacology contacts at the companies behind "
+                     "novel mechanisms the MOA mini-review series has not covered."),
+        L("Who fills it in", "The AE team. The 'Clin pharm contact' column ships "
+                             "empty and the engine never writes to it."),
+        L("Why it ships empty", "Pre-filling it with a paper's author would be worse "
+                                "than blank: that person is often not the right one "
+                                "to approach. Candidate authors live in the dossier."),
+        L("", ""),
+        L("1. GAP ANALYSIS  (decides what is on the list)", ""),
+        L("Run", "Live from PubMed on every invocation, never from a stored list."),
+        L("Query", gaps.SERIES_QUERY),
+        L("Series test", "Drug before the colon, the convention after it. Excludes "
+                         "research articles that merely mention mechanism of action."),
+        L("Published test", "The paper must have a PMC release date. An accepted "
+                            "paper assigned to a future issue is not published; this "
+                            "is the rule that caught fruquintinib being counted early."),
+        L("Status", report["note"]),
+        L("Published papers found", str(report["published"])),
+        L("Modalities covered", ", ".join(f"{k} ({v})" for k, v in
+                                          sorted(report["coverage"].items(),
+                                                 key=lambda kv: -kv[1])) or "-"),
+        L("Open gaps", ", ".join(sorted(report["gap_categories"])) or "none"),
+        L("Important", "A gap is purely a mechanism the series has not covered. "
+                       "Whether a contact is already known is NOT part of the test, "
+                       "because finding those contacts is the point of the sheet."),
+        L("", ""),
+        L("2. HOT SCORE  (decides the order only)", ""),
+        L("Interesting mechanism", "never-published modality +40; first approval of "
+                                   "this moiety +20; known moiety by a new route +8"),
+        L("News-worthy", "FDA priority review +12; orphan designation +8. Both come "
+                         "from the Drugs@FDA bulk files (Submissions.ReviewPriority "
+                         "and SubmissionPropertyType)."),
+        L("Attention", "PubMed papers in the last 24 months: >=100 +20, >=40 +14, "
+                       ">=15 +8, any +3. ClinicalTrials.gov studies: >=20 +10, "
+                       ">=5 +6, any +2."),
+        L("Deliberately excluded", "FAERS adverse-event report counts. They measure "
+                                   "accumulated patient exposure, so they rank older "
+                                   "drugs highest and say almost nothing about a drug "
+                                   "approved in the last three years."),
+        L("", ""),
+        L("3. TIME WINDOW", ""),
+        L("Window used", f"{months} months before today"),
+        L("Why 36 and not 12", "Measured from the series itself: joining the published "
+                               "reviews to their Drugs@FDA approval dates gives a "
+                               "median approval-to-review lag of 2.8 years "
+                               "(quartiles 2.0 / 2.8 / 4.3). 25% are reviewed within "
+                               "two years, 55% within three. A 12-month window would "
+                               "catch only the three fastest the series has managed."),
+        L("", ""),
+        L("4. SOURCES", ""),
+        L("Approvals (CDER)", "Drugs@FDA bulk relational files. Primary source."),
+        L("Approvals (CBER)", "Purple Book monthly change report. Required, not "
+                              "optional: Drugs@FDA omits CBER entirely. Of nine CBER "
+                              "products checked (Aucatzyl, Kymriah, Yescarta, "
+                              "Carvykti, Zolgensma, Luxturna, Hemgenix, Comirnaty, "
+                              "StrataGraft) all nine are absent from Drugs@FDA, and "
+                              "only 73 of the 125xxx BLA range appear at all. Those "
+                              "are exactly the cell & gene, CAR-T and vaccine gaps."),
+        L("MOA and indications", "DailyMed SPL, from the approved label. "
+                                 "LOINC 43679-0 and 34067-9."),
+        L("Prior review check", "PubMed, per drug."),
+        L("Not used", "openFDA drug/drugsfda: it matches conditions across the whole "
+                      "application document, so a date-plus-class query returns "
+                      "approvals from unrelated years."),
+        L("", ""),
+        L("5. THIS RUN", ""),
+        L("Gap candidates found", str(considered)),
+        L("Rows shown", f"{shown} (capped; the analysis considered all "
+                        f"{considered})"),
+        L("Priority block", f"top {top} by hot score, highlighted on sheet 1"),
+        L("Generated", datetime.date.today().isoformat()),
+    ]
+    return rows
+
+
+def build_hotlist(records, report, months, top, total=None, path=None, verbose=True):
+    """Write the two-sheet hot-list workbook. -> path
+
+    Rows are companies rather than drugs, because the question being asked is
+    "does anyone know someone at Autolus?". The priority block is the top `top`
+    by hot score; everything else follows below a second banner, still present.
+    """
+    path = path or config.hotlist_path()
+    ranked = sorted(records, key=lambda r: -int(r.get("hot_score") or 0))
+    total = total or len(ranked)
+    ranked = ranked[:total]                 # the sheet is capped, not the analysis
+    pri = ranked[:top] if top else ranked
+    rest = ranked[top:] if top else []
+
+    header = list(config.HOTLIST_COLUMNS)
+    rows, highlight, banner = [header], set(), set()
+
+    def block(label, items):
+        nonlocal rows
+        if not items:
+            return
+        rows.append([label] + [""] * (len(header) - 1))
+        banner.add(len(rows))
+        by_company = {}
+        for r in items:
+            by_company.setdefault(_normalise_company(r.get("sponsor_raw", "")) or "?",
+                                  []).append(r)
+        order = sorted(by_company,
+                       key=lambda c: -max(int(x.get("hot_score") or 0)
+                                          for x in by_company[c]))
+        for comp in order:
+            for i, r in enumerate(sorted(by_company[comp],
+                                         key=lambda x: -int(x.get("hot_score") or 0))):
+                inds = r.get("indications") or []
+                rows.append([
+                    r.get("sponsor_raw", "") if i == 0 else "",
+                    f"{r.get('brand','')} ({r.get('ingredient_raw','')})".strip(),
+                    r.get("moa", ""),
+                    "\n".join(f"{n}. {x}" for n, x in enumerate(inds, 1)) if len(inds) > 1
+                    else (inds[0] if inds else ""),
+                    r.get("approval_date", ""),
+                    r.get("gap_reason", ""),
+                    "",                       # never written by the engine
+                ])
+                if label.startswith("PRIORITY"):
+                    highlight.add(len(rows))
+
+    block(f"PRIORITY  -  top {len(pri)} by hot score", pri)
+    if rest:
+        rows.append([""] * len(header))
+        block(f"ALSO UNCOVERED  -  {len(rest)} further candidates, not prioritised",
+              rest)
+
+    tabs = {"Hot list": rows,
+            "Methodology": _hotlist_methodology(report, months, top,
+                                                len(records), len(ranked))}
+    store.xlsx_write(path, tabs, highlight={"Hot list": highlight},
+                     banner={"Hot list": banner})
+    if verbose:
+        print(f"  hot list: {len(pri)} priority + {len(rest)} further "
+              f"= {len(ranked)} of {len(records)} gap candidates -> {path}")
     return path
