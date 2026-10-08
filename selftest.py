@@ -446,6 +446,33 @@ def test_history_accumulates(tmp):
           sorted(a["history"], reverse=True), [2028, 2027, 2026])
 
 
+def test_python_floor(tmp):
+    section("Every module parses on the oldest Python a recipient may have")
+    import glob
+    import subprocess as sp
+    here = os.path.dirname(os.path.abspath(__file__))
+    # /usr/bin/python3 ships with macOS and is 3.9. A colleague who never
+    # installed Python will be running something like it, so syntax newer than
+    # that is a SyntaxError on exactly the machines this tool exists to serve.
+    # A nested f-string (PEP 701, 3.12) shipped once and broke the bundle.
+    old = next((p for p in ("/usr/bin/python3", "/usr/bin/python3.9")
+                if os.path.exists(p)), None)
+    if not old:
+        print("  skip  no older interpreter on this machine to test against")
+        return
+    ver = sp.run([old, "-c", "import sys;print('%d.%d' % sys.version_info[:2])"],
+                 capture_output=True, text=True).stdout.strip()
+    bad = []
+    for f in sorted(glob.glob(os.path.join(here, "*.py"))):
+        r = sp.run([old, "-c",
+                    "import ast,sys;ast.parse(open(sys.argv[1]).read())", f],
+                   capture_output=True, text=True)
+        if r.returncode:
+            bad.append(os.path.basename(f) + ": "
+                       + (r.stderr.strip().splitlines() or [""])[-1])
+    check(f"all modules parse on Python {ver}", bad, [])
+
+
 def test_contact_carry_forward(tmp):
     section("Contacts the AE team typed survive the next run")
     import sheets
@@ -612,6 +639,7 @@ def main():
         test_attendance_columns(tmp)
         test_year_rollover()
         test_history_accumulates(tmp)
+        test_python_floor(tmp)
         test_contact_carry_forward(tmp)
         test_clinpharm_tier1()
         test_clinpharm_acquisition_and_drift()

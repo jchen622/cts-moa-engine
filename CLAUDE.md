@@ -370,3 +370,43 @@ Two fixes on 2026-10-08, both user-reported:
 
 The page can now also set the output folder (validated in `gui._validate_outdir`: inside the
 home folder, writable, created if needed) and edit `input/my drugs.txt`.
+
+
+## Python floor: 3.9, and it is now gated
+
+**Never use syntax newer than Python 3.9 in any module.** `/usr/bin/python3` ships with macOS
+and is 3.9, and the launcher takes the first working interpreter it finds, so a colleague who
+never installed Python runs something like it.
+
+This shipped once and broke the whole bundle: a nested f-string
+(`f"{f'...{x}...' if y else ''}"`, PEP 701, needs 3.12) parsed fine on the dev machine's 3.14
+and was a SyntaxError on 3.9. The engine died before reaching the browser, which presented
+to the user as "the browser tab did not open".
+
+`selftest.test_python_floor` now parses every module under `/usr/bin/python3` and fails if any
+of them needs something newer.
+
+Two things made that bug far harder to find than it should have been, both fixed:
+
+- **The bundle compiled every module under the LAST module's filename**, so a SyntaxError in
+  `sources.py` was reported as `selftest.py:603`.
+- **A failed launch was silent.** No terminal, log discarded, nothing on screen. The .app now
+  waits five seconds, checks the process is alive, and shows a dialog with the log tail if it
+  is not.
+
+## What ships, and how it is packaged
+
+`SEND THIS/` holds exactly one sendable file per platform:
+
+- **`CTS MOA Engine (Mac).zip`** — the .app, plus the `.command` tucked in an
+  "If the app is blocked" folder as a Gatekeeper fallback. A .app is a directory, so zipping is
+  the only way to hand over one item while keeping the no-terminal launch.
+- **`CTS MOA Engine (Windows).bat`** — already a single file.
+
+The runtime log goes to `/tmp/cts-moa-engine.log`, not beside the app: with the browser opening
+reliably it is only ever a diagnostic, and it was cluttering the folder the user actually opens.
+The working folder beside the app holds just `input/`, `output/` and `settings.json`.
+
+**The Mac app is unsigned.** Locally built it runs; emailed or synced it acquires a quarantine
+flag and Gatekeeper blocks the first launch. The recipient has to right-click and choose Open
+once. That path has never been tested here, because a locally built file is never quarantined.

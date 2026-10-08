@@ -599,7 +599,11 @@ def find_by_name(names, verbose=True):
         rec["novelty_reason"] = f"added by hand ({want})"
         out.append(rec)
     if verbose:
-        print(f"  added by hand: {len(out)} found"
-              f"{f', NOT FOUND: {', '.join(missing)}' if missing else ''}",
-              file=sys.stderr)
+        # Built by concatenation, not a nested f-string: a nested one needs
+        # Python 3.12 (PEP 701) and /usr/bin/python3 on macOS is 3.9, so it was
+        # a SyntaxError on exactly the machines this tool is meant to run on.
+        note = f"  added by hand: {len(out)} found"
+        if missing:
+            note += ", NOT FOUND: " + ", ".join(missing)
+        print(note, file=sys.stderr)
     return out

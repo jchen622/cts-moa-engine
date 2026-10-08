@@ -89,7 +89,11 @@ def _install(payload, appdir):
         mod.__package__ = ""
         sys.modules[name] = mod
     for name, code in src.items():
-        exec(compile(code, mod.__file__, "exec"), sys.modules[name].__dict__)
+        # Compile under THIS module's filename. Using the loop variable from
+        # the block above reported every error against the last module loaded,
+        # so a SyntaxError in sources.py appeared as selftest.py.
+        exec(compile(code, sys.modules[name].__file__, "exec"),
+             sys.modules[name].__dict__)
 
 
 def _seed(payload, appdir):
@@ -184,15 +188,26 @@ APPLESCRIPT = """on run
 		do shell script "chmod +x " & quoted form of engine
 		-- Log rather than discard. If the browser fails to open, gui.log is the
 		-- only way the user can find the URL, and the old .app wrote one.
-		set logDir to base & "/CTS MOA Engine"
-		do shell script "mkdir -p " & quoted form of logDir
+		set logFile to "/tmp/cts-moa-engine.log"
 		-- PYTHONUNBUFFERED is the equivalent of python3 -u here: the shell header
 		-- execs python itself, so the flag cannot be passed on the command line.
 		-- Without it the log stays empty and a user whose browser did not open has
 		-- no way to find the URL.
 		do shell script "PYTHONUNBUFFERED=1 MOA_APPDIR_BASE=" & quoted form of base & ¬
-			" nohup " & quoted form of engine & " >> " & ¬
-			quoted form of (logDir & "/gui.log") & " 2>&1 &"
+			" nohup " & quoted form of engine & " > " & ¬
+			quoted form of logFile & " 2>&1 &"
+		-- A silent failure is the worst outcome: the user double-clicks, nothing
+		-- happens, and there is no terminal to show them why. So check whether the
+		-- process is still alive and surface the log if it is not.
+		delay 5
+		set alive to (do shell script ¬
+			"pgrep -f engine.command >/dev/null 2>&1 && echo yes || echo no")
+		if alive is "no" then
+			set tailOut to (do shell script "tail -n 12 " & quoted form of logFile & ¬
+				" 2>/dev/null || echo '(no log)'")
+			display dialog "The CTS MOA engine stopped before it could start." & ¬
+				return & return & tailOut buttons {"OK"} default button 1 with icon stop
+		end if
 	on error errText
 		display dialog "Could not start the CTS MOA engine." & return & return & ¬
 			errText buttons {"OK"} default button 1 with icon stop
@@ -228,6 +243,41 @@ def _build_mac_app(command_path):
     os.chmod(dest, os.stat(dest).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     print(f"  {_kb(app)}  {app}  (no terminal window)")
     return app
+
+
+def _package(app, command_path, bat_path):
+    """One sendable file per platform.
+
+    A .app is a folder, so it cannot be emailed as-is; zipping it is the only
+    way to hand over one item while keeping the no-terminal launch. The loose
+    .command is folded in as a fallback for a Mac where Gatekeeper blocks the
+    unsigned app, and then removed from the folder so there is nothing to
+    choose between.
+    """
+    import zipfile
+    mac_zip = os.path.join(DIST, "CTS MOA Engine (Mac).zip")
+    if os.path.exists(mac_zip):
+        os.remove(mac_zip)
+    if app:
+        with zipfile.ZipFile(mac_zip, "w", zipfile.ZIP_DEFLATED) as z:
+            for root, _d, files in os.walk(app):
+                for f in files:
+                    full = os.path.join(root, f)
+                    z.write(full, os.path.relpath(full, DIST))
+            z.write(command_path,
+                    "If the app is blocked/CTS MOA Engine.command")
+        shutil.rmtree(app)
+        os.remove(command_path)
+        print(f"  {_kb_file(mac_zip)}  {mac_zip}")
+    win = os.path.join(DIST, "CTS MOA Engine (Windows).bat")
+    if os.path.exists(win):
+        os.remove(win)
+    os.rename(bat_path, win)
+    print(f"  {_kb_file(win)}  {win}")
+
+
+def _kb_file(path):
+    return f"{os.path.getsize(path) // 1024:>6} KB"
 
 
 def _kb(path):
@@ -273,7 +323,7 @@ def build():
 
     assert WIN_HEADER.count("\n") == 1, (
         "the batch header must be exactly one line -- python -x skips only the first")
-    _build_mac_app(mac)
+    app = _build_mac_app(mac)
     win = os.path.join(DIST, "CTS MOA Engine.bat")
     with open(win, "wb") as fh:
         fh.write(WIN_HEADER.encode("utf-8"))          # CRLF, written literally
@@ -282,8 +332,8 @@ def build():
 
     print(f"\nbundled {len(payload['modules'])} modules, "
           f"{len(payload['data'])} data file(s)")
-    for p in out:
-        print(f"  {os.path.getsize(p) / 1024:6.0f} KB  {p}")
+    print("\nSEND THIS - one file per platform:")
+    _package(app, mac, win)
     return out
 
 
