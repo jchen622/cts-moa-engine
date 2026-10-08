@@ -177,6 +177,49 @@ WIN_NOTE = """# (Line 1 above is Windows batch; Python skipped it with -x. On ma
 """
 
 
+MAC_UNQUARANTINE = """#!/bin/sh
+# Double-click this if "CTS MOA Engine" will not open.
+#
+# macOS flags anything that arrives by email or Drive as quarantined, and
+# refuses to launch an app that has not been notarized by Apple. Notarizing
+# needs a paid Apple Developer account. Removing the flag is the standard fix
+# and only affects this one app.
+cd "$(dirname "$0")/.." || exit 1
+APP="CTS MOA Engine.app"
+if [ ! -d "$APP" ]; then
+  echo "Could not find $APP next to this file."
+  echo "Keep this folder alongside the app and try again."
+  printf "Press Return to close. "; read -r _; exit 1
+fi
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null
+echo "Unblocked. Starting the engine..."
+open "$APP"
+
+# Wait and confirm, rather than exiting into a race with the detached launch.
+# Reporting success without checking is how a silent failure reaches the user.
+n=0
+while [ $n -lt 20 ]; do
+  if pgrep -f "engine.command" >/dev/null 2>&1; then
+    echo ""
+    echo "Running. Your browser should be showing the engine now."
+    echo "If it is not, the address is in /tmp/cts-moa-engine.log"
+    echo ""
+    echo "You only needed this once. From now on just double-click"
+    echo "\"CTS MOA Engine\" itself."
+    printf "Press Return to close this window. "; read -r _
+    exit 0
+  fi
+  n=$((n + 1)); sleep 1
+done
+echo ""
+echo "It did not start. The last lines of the log were:"
+echo ""
+tail -n 12 /tmp/cts-moa-engine.log 2>/dev/null || echo "(no log was written)"
+printf "\nPress Return to close this window. "; read -r _
+exit 1
+"""
+
+
 APPLESCRIPT = """on run
 	try
 		set selfPath to POSIX path of (path to me)
@@ -241,6 +284,24 @@ def _build_mac_app(command_path):
     dest = os.path.join(res, "engine.command")
     shutil.copy2(command_path, dest)
     os.chmod(dest, os.stat(dest).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    # RE-SIGN. osacompile signs the bundle, and adding the payload afterwards
+    # breaks that seal: codesign then reports "a sealed resource is missing or
+    # invalid" and macOS refuses to open the app at all, which is not the same
+    # as the ordinary unsigned-developer warning and cannot be clicked past.
+    # Ad-hoc (-s -) is all that is available without a Developer ID, and it is
+    # enough to make the bundle internally consistent.
+    rc = subprocess.call(["codesign", "--force", "--deep", "--sign", "-", app],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if rc != 0:
+        print("  WARNING: could not re-sign the app; macOS may refuse to open it")
+    else:
+        chk = subprocess.run(["codesign", "--verify", "--deep", "--strict", app],
+                             capture_output=True, text=True)
+        if chk.returncode != 0:
+            print(f"  WARNING: signature still invalid: {chk.stderr.strip()[:70]}")
+        else:
+            print("  signature verifies after adding the payload")
     print(f"  {_kb(app)}  {app}  (no terminal window)")
     return app
 
@@ -254,18 +315,42 @@ def _package(app, command_path, bat_path):
     unsigned app, and then removed from the folder so there is nothing to
     choose between.
     """
-    import zipfile
     mac_zip = os.path.join(DIST, "CTS MOA Engine (Mac).zip")
     if os.path.exists(mac_zip):
         os.remove(mac_zip)
     if app:
-        with zipfile.ZipFile(mac_zip, "w", zipfile.ZIP_DEFLATED) as z:
-            for root, _d, files in os.walk(app):
-                for f in files:
-                    full = os.path.join(root, f)
-                    z.write(full, os.path.relpath(full, DIST))
-            z.write(command_path,
-                    "If the app is blocked/CTS MOA Engine.command")
+        # ditto, NOT zipfile. An .app is signed, and Python's zip writer does
+        # not carry the extended attributes and resource forks the signature
+        # depends on, so the unzipped copy fails validation and macOS reports
+        # it as damaged and refusing to open. ditto is Apple's own tool for
+        # exactly this and is what `Compress` in Finder uses underneath.
+        staging = os.path.join(DIST, "_mac")
+        if os.path.isdir(staging):
+            shutil.rmtree(staging)
+        helper_dir = os.path.join(staging, "If the app will not open")
+        os.makedirs(helper_dir)
+        # macOS attaches a quarantine flag to anything that arrives by mail or
+        # Drive, and refuses to launch an app that is not notarized -- silently,
+        # with no dialog to click past. Notarizing needs a paid Developer ID.
+        # Stripping the flag is the reliable fix, so it ships as something to
+        # double-click rather than a command to retype.
+        fixer = os.path.join(helper_dir, "Open the engine.command")
+        with open(fixer, "w", encoding="utf-8") as fh:
+            fh.write(MAC_UNQUARANTINE)
+        os.chmod(fixer, os.stat(fixer).st_mode | stat.S_IXUSR | stat.S_IXGRP
+                 | stat.S_IXOTH)
+        subprocess.check_call(["ditto", app, os.path.join(
+            staging, os.path.basename(app))])
+        shutil.copy2(command_path, os.path.join(
+            helper_dir, "Run in a terminal instead.command"))
+        # No --keepParent: it would wrap everything in the staging folder's
+        # name, so unzipping produced "_mac/CTS MOA Engine.app".
+        rc = subprocess.call(["ditto", "-c", "-k", "--sequesterRsrc",
+                              staging, mac_zip])
+        shutil.rmtree(staging)
+        if rc != 0:
+            print("  ditto failed; the .app is still in SEND THIS")
+            return
         shutil.rmtree(app)
         os.remove(command_path)
         print(f"  {_kb_file(mac_zip)}  {mac_zip}")

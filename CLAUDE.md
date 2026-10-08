@@ -407,6 +407,26 @@ The runtime log goes to `/tmp/cts-moa-engine.log`, not beside the app: with the 
 reliably it is only ever a diagnostic, and it was cluttering the folder the user actually opens.
 The working folder beside the app holds just `input/`, `output/` and `settings.json`.
 
-**The Mac app is unsigned.** Locally built it runs; emailed or synced it acquires a quarantine
-flag and Gatekeeper blocks the first launch. The recipient has to right-click and choose Open
-once. That path has never been tested here, because a locally built file is never quarantined.
+### Signing the Mac app: two traps, both now handled
+
+**Re-sign after adding the payload.** `osacompile` signs the bundle; copying `engine.command`
+into `Contents/Resources` afterwards breaks the seal. `codesign --verify` then reports "a sealed
+resource is missing or invalid" and macOS refuses to open the app **with no dialog to click
+past** -- which is not the ordinary unsigned-developer warning and cannot be worked around by
+the user. `_build_mac_app()` re-signs ad-hoc (`--sign -`) and verifies, printing a warning if
+verification still fails.
+
+**Zip with `ditto`, never `zipfile`.** A signed bundle depends on extended attributes that
+Python's zip writer does not carry. Use `ditto -c -k --sequesterRsrc` and no `--keepParent`
+(it wraps everything in the staging folder's name).
+
+**Quarantine still blocks it, and that is unavoidable.** Ad-hoc signing is not notarization, so
+`spctl` rejects the app, and anything arriving by mail or Drive carries
+`com.apple.quarantine`. Tested: a quarantined copy **silently fails to launch**, and launches
+fine once the flag is stripped. Notarizing needs a paid Developer ID.
+
+So the zip ships `If the app will not open/Open the engine.command`, which strips the flag,
+launches the app, **waits up to 20 seconds and confirms the process is alive**, and prints the
+log tail if it is not. An earlier version exited after two seconds and reported success into a
+race with the detached launch, which is the same silent-failure class as the rest of this
+section.
