@@ -542,11 +542,11 @@ def cmd_invites(args):
         _log(f"{os.path.basename(path_in)} is missing a 'Drug name' column "
              f"— was its header edited?")
         return 1
-    # Either contact column will do, and they are found by the same loose match
-    # the carry-forward uses, so a reworded header still works.
+    # Either column that can name a person will do, found by the same loose
+    # match the carry-forward uses, so a reworded header still works. The
+    # member column counts because the team fills it in by hand.
     contact_cols = [i for i, h in enumerate(columns)
-                    if sheets._human_col(h) in (sheets.CONTACT_COL,
-                                                sheets.ASCPT_COL)]
+                    if sheets._human_col(h) in sheets.CONTACT_SOURCES]
     if not contact_cols:
         _log(f"{os.path.basename(path_in)} has no contact column "
              f"— was its header edited?")

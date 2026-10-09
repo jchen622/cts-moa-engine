@@ -517,40 +517,52 @@ def members_at_company(sponsor, records):
     if not at:
         return "", "", "no members at this company"
 
-    # Filter to clinical pharmacology only where the export says. An export
-    # with no discipline column must not silently return every employee as a
-    # clinical pharmacologist, so the cell says what it is showing.
+    # Filter to clinical pharmacology where the export says, but do not hide
+    # the rest: the team asked to see everyone at the company, with the
+    # non-matching disciplines labelled, so the judgement stays theirs.
+    # Clinical pharmacologists sort first and unparenthesised, so a regulatory
+    # or commercial contact can never be mistaken for one.
     stated = [r for r in at if r.get("discipline")]
     if stated:
-        cp = [r for r in stated if is_clinpharm(r["discipline"])]
-        if not cp:
-            return "", "", f"{len(at)} member(s) here, none in clinical pharmacology"
-        how = "ASCPT member, discipline stated as clinical pharmacology"
+        cp = [r for r in at if is_clinpharm(r.get("discipline", ""))]
+        other = [r for r in at if r not in cp]
+        how = (f"{len(cp)} in clinical pharmacology"
+               if cp else "none in clinical pharmacology")
+        if other:
+            how += f", {len(other)} other discipline(s) listed and labelled"
     else:
-        cp = at
-        how = "ASCPT member at this company; export states no discipline"
+        cp, other = at, []
+        how = "ASCPT member(s) at this company; export states no discipline"
 
     # Deduplicated on the name, keeping the first address seen for each. A
     # directory export repeats a person across communities, and listing someone
     # three times reads as three different people at the same company.
-    seen = {}
-    for r in cp:
+    seen, labels = {}, {}
+    for r in list(cp) + list(other):
         nm = (r.get("name") or "").strip()
-        if nm and nm not in seen:
-            seen[nm] = (r.get("email") or "").strip()
+        if not nm or nm in seen:
+            continue
+        seen[nm] = (r.get("email") or "").strip()
+        # A parenthesised discipline marks someone whose stated field is NOT
+        # clinical pharmacology. An unparenthesised name is a confirmed match.
+        labels[nm] = ("" if r in cp or not r.get("discipline")
+                      else f" ({r['discipline']})")
     if not seen:
         return "", "", f"{len(at)} member(s) here, none with a usable name"
-    people = sorted(seen.items())
+    # Sorted within each group, clin pharm group first, so the order is stable
+    # between runs and the two cells stay in step.
+    people = [(nm, seen[nm]) for nm in
+              sorted(seen, key=lambda n: (bool(labels[n]), n.lower()))]
 
     def listed(values):
         if len(values) == 1:
             return values[0]
         return "\n".join(f"{i}. {v or '-'}" for i, v in enumerate(values, 1))
 
-    how += f"; {len(people)} match(es)"
+    how += f"; {len(people)} listed"
     if not any(e for _n, e in people):
         how += "; export carries no email column"
-    return (listed([n for n, _e in people]),
+    return (listed([n + labels[n] for n, _e in people]),
             listed([e for _n, e in people]), how)
 
 
@@ -936,11 +948,9 @@ def build_invites_html(rows, year, columns=None):
     for r in rows:
         d = dict(zip(cols, r))
         # Either contact column counts: both are a human naming a real person.
-        contact = ""
-        for h, v in d.items():
-            if _human_col(h) in (CONTACT_COL, ASCPT_COL) and (v or "").strip():
-                contact = v.strip()
-                break
+        contact, needs_choice = letter_contact(d)
+        if needs_choice:
+            contact += "   [several members listed; choose one before sending]"
         owner = next((v for h, v in d.items()
                       if _human_col(h) == OWNER_COL and (v or "").strip()), "")
         # The meeting line is only offered when a human has named someone to
@@ -991,30 +1001,34 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
         L("WHAT THE LIST IS", ""),
         L("Purpose", "Find clinical pharmacology contacts at the companies behind "
                      "novel mechanisms the MOA mini-review series has not covered."),
-        L("Who fills it in", "The AE team owns the last three columns: 'AE owner', "
-                             "'Clin pharm contact' and 'ClinPharm contact from "
-                             "ASCPT Membership Directory'. All three ship empty "
-                             "and the engine writes a value into none of them on "
-                             "any run."),
+        L("Who fills it in", "The AE team owns the last four columns: 'ClinPharm "
+                             "ASCPT Member', 'ClinPharm ASCPT Member email', "
+                             "'Clin pharm contact' and 'AE owner'. All four ship "
+                             "empty and all four are carried forward on every "
+                             "later run."),
         L("Why they ship empty", "Pre-filling a contact with a paper's author would "
                                  "be worse than blank: that person is often not the "
                                  "right one to approach."),
-        L("Why the ASCPT column is manual", "The ASCPT Membership Directory sits "
-                                            "behind a member login and its terms do "
-                                            "not permit compiling the directory into "
-                                            "a list. An AE looks a person up and "
-                                            "types the name in; the engine does not "
-                                            "query it."),
-        L("The last two columns", "'ClinPharm ASCPT Member' and 'ClinPharm ASCPT "
-                                  "Member email' are the only ones the ENGINE "
-                                  "fills. They list EVERY ASCPT member whose "
-                                  "organisation matches the company, filtered to "
-                                  "clinical pharmacology where the export states a "
-                                  "discipline, numbered and index-aligned so line 3 "
-                                  "of one is the address of line 3 of the other. "
-                                  "Both are regenerated on every run and NEITHER is "
-                                  "carried forward, so do not type into them: use "
-                                  "'Clin pharm contact' instead."),
+        L("Why the ASCPT pair is manual", "The engine does not query the ASCPT "
+                                          "Membership Directory and stores no "
+                                          "credential for it. An AE looks a person "
+                                          "up and types the name in. The only "
+                                          "automated route is an export someone "
+                                          "entitled to the data supplies, imported "
+                                          "with 'roster --kind members'."),
+        L("The ASCPT member pair", "'ClinPharm ASCPT Member' and 'ClinPharm ASCPT "
+                                   "Member email' are filled in by the team. They "
+                                   "are index-aligned: line 3 of one is the address "
+                                   "of line 3 of the other, and a member with no "
+                                   "address shows as '-' so a gap cannot shift the "
+                                   "lines below it onto the wrong person."),
+        L("Typed values always win", "If an ASCPT membership export has been "
+                                     "imported, the engine fills that pair too, but "
+                                     "ONLY where BOTH cells came back empty. It "
+                                     "never overwrites a name someone typed, and it "
+                                     "fills the two cells together or not at all, "
+                                     "since filling one would break the alignment "
+                                     "between them."),
         L("Where that list comes from", "An ASCPT membership export the team "
                                         "imports with 'roster --kind members', "
                                         "stored at input/" + config.MEMBERS_FILE +
@@ -1032,7 +1046,7 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
                                           "export states no discipline, every "
                                           "member at the company is listed and the "
                                           "status row above says so."),
-        L("Re-runs are safe", "Anything typed into those three columns is carried "
+        L("Re-runs are safe", "Anything typed into those four columns is carried "
                               "forward onto the next run, keyed on the drug rather "
                               "than the row, because the ranking changes between "
                               "runs. The headers are matched loosely, so rewording "
@@ -1150,16 +1164,42 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
 
 HOTLIST_TAB = "Outreach list"
 CONTACT_COL = "Clin pharm contact"
-ASCPT_COL = "ClinPharm contact from ASCPT Membership Directory"
 OWNER_COL = "AE owner"
 MEMBER_COL = "ClinPharm ASCPT Member"
 MEMBER_EMAIL_COL = "ClinPharm ASCPT Member email"
-# Both of these are the engine's. Neither is carried forward.
-ENGINE_COLS = [MEMBER_COL, MEMBER_EMAIL_COL]
 
-# The three columns the team owns. The engine writes a value into none of them
-# on any run; it only ever copies forward what was already typed in.
-HUMAN_COLS = [OWNER_COL, CONTACT_COL, ASCPT_COL]
+# All four belong to the team, in sheet order, and all four carry forward. The
+# member pair was engine-only until the team decided to fill it in by hand, at
+# which point carrying it forward stopped being optional: a run that
+# regenerated those cells would hand back a blank sheet and the typing would be
+# gone. The engine still fills the pair where a cell comes back EMPTY and a
+# membership export exists, but a typed value always wins.
+HUMAN_COLS = [MEMBER_COL, MEMBER_EMAIL_COL, CONTACT_COL, OWNER_COL]
+
+# The columns that can name a recipient, in preference order. "Clin pharm
+# contact" comes first because it is an AE's deliberate single choice, where the
+# member column may legitimately hold several candidates.
+CONTACT_SOURCES = [CONTACT_COL, MEMBER_COL]
+
+
+def letter_contact(d):
+    """-> (name, needs_narrowing) for one row's header->value mapping.
+
+    `needs_narrowing` is True when the only value available is a numbered list
+    of several members. A draft addressed to "1. Amita Joshi 2. Rong Shi" is
+    worse than one addressed to a blank, so the letter says a choice is still
+    needed rather than silently taking the first name.
+    """
+    by_col = {}
+    for h, v in d.items():
+        col = _human_col(h)
+        if col in CONTACT_SOURCES and (v or "").strip():
+            by_col.setdefault(col, v.strip())
+    for col in CONTACT_SOURCES:
+        val = by_col.get(col)
+        if val:
+            return val, "\n" in val
+    return "", False
 
 
 def _appl_label(rec):
@@ -1183,33 +1223,31 @@ def _norm_header(h):
 
 
 def _human_col(header):
-    """Which of the team's columns is this header, if any?
+    """Which of the team's four columns is this header, if any?
 
     Matched loosely on purpose. These headers get reworded by hand in Excel,
     and a carry-forward keyed on an exact string fails silently: the next run
-    writes a blank sheet and fifty typed-in names are gone. Anything mentioning
-    ASCPT is the directory column, anything mentioning an owner is the owner
-    column, and any other contact column is the main one.
+    writes a blank sheet and the typed-in names are gone.
+
+    **The test order is load-bearing**, because the headers overlap on
+    substrings. "ClinPharm ASCPT Member email" contains "ascpt", and the
+    retired "ClinPharm contact from ASCPT Membership Directory" contains both
+    "ascpt" and "contact". So email is tested before ASCPT, and ASCPT before
+    contact. Putting contact first sends the retired header to the wrong
+    column and silently moves one person's name onto another row's meaning.
+
+    That retired header maps onto MEMBER_COL deliberately: it is semantically
+    the same thing, a name someone looked up in the ASCPT directory, so a value
+    already typed under the old heading reappears in the new column instead of
+    being dropped when the column went away.
     """
     h = re.sub(r"[^a-z]+", " ", (header or "").lower()).strip()
     if not h:
         return None
-    # The engine's two columns must not be carried forward. Tested FIRST,
-    # because the ASCPT rule below would otherwise swallow them: their headers
-    # contain both "ascpt" and "member". That would land a regenerated value on
-    # the same key as the manual directory column and overwrite a lookup an AE
-    # did by hand.
-    #
-    # Matched EXACTLY, where every other rule here is loose, and the asymmetry
-    # is deliberate. A reworded header is ambiguous between these two columns,
-    # and the two ways of being wrong are not equally bad: treating a human
-    # column as the engine's loses typed work silently, while treating the
-    # engine's as human at worst carries one derived name forward. So anything
-    # that is not this exact header falls through to the human rules.
-    if _norm_header(h) in {_norm_header(c) for c in ENGINE_COLS}:
-        return None
+    if "ascpt" in h and ("email" in h or "mail" in h):
+        return MEMBER_EMAIL_COL
     if "ascpt" in h:
-        return ASCPT_COL
+        return MEMBER_COL
     if "owner" in h:
         return OWNER_COL
     if "contact" in h:
@@ -1217,18 +1255,38 @@ def _human_col(header):
     return None
 
 
+def _team_cells(prior, sponsor, members):
+    """The team's four columns for one row, in HUMAN_COLS order.
+
+    Precedence, which is the whole point of this function: a value the team
+    typed wins over anything the engine can derive. The membership export only
+    reaches a cell that carried forward EMPTY.
+
+    The member pair is filled or left alone TOGETHER. Filling a name from the
+    export while keeping a typed address, or the reverse, would break the index
+    alignment between the two cells and put one person's name against
+    another's address.
+    """
+    out = {c: (prior.get(c) or "") for c in HUMAN_COLS}
+    if members and not (out[MEMBER_COL] or out[MEMBER_EMAIL_COL]):
+        names, emails, _how = members_at_company(sponsor, members)
+        out[MEMBER_COL], out[MEMBER_EMAIL_COL] = names, emails
+    return [out[c] for c in HUMAN_COLS]
+
+
 def _member_records():
     """The imported ASCPT membership export, or none. -> (records, note)
 
     Optional in every direction. No file, an unreadable file or a file with no
     organisation column all return an empty list and a note saying why, because
-    the tenth column being blank for a bad reason must be visible rather than
-    look like "no members at any of these companies".
+    a blank member column for a bad reason must be visible rather than look
+    like "no members at any of these companies".
     """
     path = config.members_file()
     if not os.path.exists(path):
         return [], ("no ASCPT membership list imported, so '" + MEMBER_COL
-                    + "' is blank (import one with: roster --kind members)")
+                    + "' is whatever the team has typed "
+                      "(import one with: roster --kind members)")
     try:
         recs = load_member_records(path)
     except Exception as e:
@@ -1341,15 +1399,12 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
                 _appl_label(r),
                 r.get("approval_date", ""),
                 r.get("sponsor_raw", ""),
-                # The team's three columns. Blank unless an AE already filled
-                # one in on an earlier run; the engine never originates a value
-                # in any of them.
-                *[carried.get(_contact_key(drug), {}).get(c, "")
-                  for c in HUMAN_COLS],
-                # The last two are the engine's, regenerated every run from
-                # the imported membership list and index-aligned with each
-                # other so the pair reads across.
-                *members_at_company(r.get("sponsor_raw", ""), members)[:2],
+                # The team's four columns, in sheet order. A value typed on an
+                # earlier run always wins; the membership export only fills a
+                # cell that came back empty, and with no export imported these
+                # are simply whatever the team last typed.
+                *_team_cells(carried.get(_contact_key(drug), {}),
+                             r.get("sponsor_raw", ""), members),
             ])
             if priority:
                 highlight.add(len(rows))
@@ -1371,20 +1426,21 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
     store.xlsx_write(path, tabs, highlight={HOTLIST_TAB: highlight},
                      banner={HOTLIST_TAB: banner})
     if verbose:
-        ci = header.index(CONTACT_COL)
-        ai = header.index(ASCPT_COL)
+        # Report every team column that came back with something in it. The
+        # count is the team's own work surviving the run, so it is worth
+        # printing rather than leaving them to scroll and check.
+        idx = [header.index(c) for c in HUMAN_COLS]
         kept = sum(1 for row in rows[1:]
-                   if max(ci, ai) < len(row)
-                   and ((row[ci] or "").strip() or (row[ai] or "").strip()))
+                   if any(i < len(row) and (row[i] or "").strip() for i in idx))
         hand = f"{len(manual)} by hand + " if manual else ""
         print(f"  outreach list: {hand}{len(pri)} priority + {len(rest)} further "
               f"= {len(manual) + len(ranked)} rows")
         if kept:
-            print(f"    carried forward {kept} contact(s) already filled in")
+            print(f"    carried forward {kept} row(s) the team had filled in")
         mi = header.index(MEMBER_COL)
         hit = sum(1 for row in rows[1:]
                   if mi < len(row) and (row[mi] or "").strip())
         print(f"    {member_note}"
-              + (f"; matched on {hit} row(s)" if members else ""))
+              + (f"; {hit} row(s) have a member named" if members else ""))
         print(f"    -> {path}")
     return path

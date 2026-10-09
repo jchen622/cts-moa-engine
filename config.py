@@ -204,30 +204,25 @@ def dossier_name(year):
 
 
 # --------------------------------------------------------------- hot list
-# Columns are exactly what the team asked for and nothing else. "Clin pharm
-# contact" ships EMPTY and the engine never writes to it: it is the question
-# being put to the AE team, not an answer the engine offers. Pre-filling it with
-# a paper's author would be worse than blank, because that person is frequently
-# not the right one to approach.
-# The last three are the team's, not the engine's. It ships them blank and
-# never writes a value into any of them, on any run. The ASCPT column is
-# deliberately manual: the member directory is behind a login and its terms do
-# not permit scraping, so an AE looks the person up and types the name in.
-# The last TWO are the engine's and are index-aligned: name 2 in one cell is
-# the person whose address is line 2 of the other, so the pair can be read
-# across. Every match is listed, not a sample, because a company can have
-# several clinical pharmacologists and picking one for the editor is not the
-# engine's call.
-# "ClinPharm ASCPT Member" is the one contact-ish column the ENGINE fills. It
-# is populated from an ASCPT membership export the user imports with
-# `roster --kind members`, and it is blank until one exists. Keep it last and
-# keep it distinct from the manual directory column beside it: that one is a
-# lookup an AE did by hand, and nothing regenerated must ever overwrite it.
+# Ten columns, in the order the editorial team asked for. The first six the
+# engine derives from the FDA feeds and the label; the last four belong to the
+# team and the engine must never overwrite a value in any of them.
+#
+# The two ASCPT columns used to be three, with a hand-filled directory column
+# sitting beside an engine-filled one. That was redundant and the team cut it.
+# What remains is ONE pair, name and address, and the team fills them in by
+# hand. If an ASCPT membership export is ever imported (`roster --kind
+# members`) the engine fills the pair too, but ONLY where the cell came back
+# empty: a name someone typed always wins over anything regenerated.
+#
+# The pair is index-aligned. Line 2 of the name cell is the person whose
+# address is line 2 of the email cell, and a member with no address renders as
+# "-" rather than being dropped, because a gap would shift every line below it
+# onto the wrong person.
 HOTLIST_COLUMNS = [
     "Drug name", "MOA", "Indication", "NDA/BLA number", "Approval date",
-    "Company name", "AE owner", "Clin pharm contact",
-    "ClinPharm contact from ASCPT Membership Directory",
-    "ClinPharm ASCPT Member", "ClinPharm ASCPT Member email",
+    "Company name", "ClinPharm ASCPT Member", "ClinPharm ASCPT Member email",
+    "Clin pharm contact", "AE owner",
 ]
 
 # The gap analysis still decides what is on the list and still drives the

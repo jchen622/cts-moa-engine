@@ -13,6 +13,7 @@ it went out in. Most of what follows exists to pin that down.
 Run:  python3 selftest.py
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -555,27 +556,30 @@ def test_python_floor(tmp):
 
 
 def test_contact_carry_forward(tmp):
-    """All three of the team's columns survive the next run.
+    """All four of the team's columns survive the next run.
 
-    None of them can be regenerated. The ASCPT directory column in particular
-    is a lookup someone did one row at a time, so losing it silently is the
-    worst thing this file can do.
+    None of them can be regenerated. The ASCPT member pair in particular is a
+    directory lookup someone did one row at a time, so losing it silently is
+    the worst thing this file can do.
     """
     section("What the AE team typed survives the next run")
     import sheets
 
     cols = list(config.HOTLIST_COLUMNS)
-    ci = cols.index(sheets.CONTACT_COL)
-    ai = cols.index(sheets.ASCPT_COL)
-    oi = cols.index(sheets.OWNER_COL)
+    i = {c: cols.index(c) for c in sheets.HUMAN_COLS}
     prior = [cols]
-    for drug, owner, contact, ascpt in (
-            ("AUCATZYL (obecabtagene autoleucel)", "JC", "Pierre L-S", ""),
-            ("TRYNGOLZA (olezarsen)", "", "", ""),
-            ("PLUVICTO (vipivotide tetraxetan)", "Erica", "", "Sanne de Jong"),
+    for drug, member, mail, contact, owner in (
+            ("AUCATZYL (obecabtagene autoleucel)", "", "", "Pierre L-S", "JC"),
+            ("TRYNGOLZA (olezarsen)", "", "", "", ""),
+            ("PLUVICTO (vipivotide tetraxetan)", "Sanne de Jong",
+             "s.dejong@example.org", "", "Erica"),
     ):
         row = [""] * len(cols)
-        row[0], row[oi], row[ci], row[ai] = drug, owner, contact, ascpt
+        row[0] = drug
+        row[i[sheets.MEMBER_COL]] = member
+        row[i[sheets.MEMBER_EMAIL_COL]] = mail
+        row[i[sheets.CONTACT_COL]] = contact
+        row[i[sheets.OWNER_COL]] = owner
         prior.append(row)
     p = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-01.xlsx"),
                          {sheets.HOTLIST_TAB: prior})
@@ -586,25 +590,54 @@ def test_contact_carry_forward(tmp):
           "Pierre L-S")
     check("the AE owner is carried",
           got.get("obecabtagene autoleucel", {}).get(sheets.OWNER_COL), "JC")
-    check("an ASCPT directory name is carried",
-          got.get("vipivotide tetraxetan", {}).get(sheets.ASCPT_COL),
+    check("a hand-typed ASCPT member is carried",
+          got.get("vipivotide tetraxetan", {}).get(sheets.MEMBER_COL),
           "Sanne de Jong")
-    check("the two contact columns do not bleed into each other",
+    check("and their address with it",
+          got.get("vipivotide tetraxetan", {}).get(sheets.MEMBER_EMAIL_COL),
+          "s.dejong@example.org")
+    check("the columns do not bleed into each other",
           got.get("vipivotide tetraxetan", {}).get(sheets.CONTACT_COL), None)
     check("a wholly blank row is not carried", "olezarsen" in got, False)
 
+    # The column this replaced. Dropping a column must MIGRATE what is in it:
+    # the retired header named the same thing, a name looked up in the ASCPT
+    # directory, so a value typed under it reappears in the member column.
+    retired = "ClinPharm contact from ASCPT Membership Directory"
+    old_sheet = [["Drug name", "Company name", retired, "Clin pharm contact"],
+                 ["Aucatzyl (Obecabtagene autoleucel)", "Autolus, Inc.",
+                  "ASCPT: looked up by hand", ""],
+                 ["FOUNDAYO (ORFORGLIPRON CALCIUM)", "ELI LILLY AND CO",
+                  "", "Lilly clin pharm lead"]]
+    p2 = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-02.xlsx"),
+                          {sheets.HOTLIST_TAB: old_sheet})
+    mig = sheets._prior_contacts(p2)
+    check("the retired ASCPT column migrates, it is not dropped",
+          mig.get("obecabtagene autoleucel", {}).get(sheets.MEMBER_COL),
+          "ASCPT: looked up by hand")
+    check("and it does NOT land in Clin pharm contact",
+          mig.get("obecabtagene autoleucel", {}).get(sheets.CONTACT_COL), None)
+    check("a value already in Clin pharm contact stays there",
+          mig.get("orforglipron calcium", {}).get(sheets.CONTACT_COL),
+          "Lilly clin pharm lead")
+
     # These headers get reworded in Excel. An exact-string match would fail
     # silently and the next run would write a blank sheet.
-    reworded = [["Drug name", "ASCPT member (clin pharm)", "Owner (AE)"],
-                ["AUCATZYL (obecabtagene autoleucel)", "Sanne de Jong", "JC"]]
-    p2 = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-02.xlsx"),
+    reworded = [["Drug name", "ASCPT member (clin pharm)", "ASCPT member e-mail",
+                 "Owner (AE)"],
+                ["AUCATZYL (obecabtagene autoleucel)", "Sanne de Jong",
+                 "s@example.org", "JC"]]
+    p3 = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-03.xlsx"),
                           {sheets.HOTLIST_TAB: reworded})
-    got2 = sheets._prior_contacts(p2)
-    check("a reworded ASCPT header still carries",
-          got2.get("obecabtagene autoleucel", {}).get(sheets.ASCPT_COL),
+    got3 = sheets._prior_contacts(p3)
+    check("a reworded member header still carries",
+          got3.get("obecabtagene autoleucel", {}).get(sheets.MEMBER_COL),
           "Sanne de Jong")
+    check("a reworded member email header still carries",
+          got3.get("obecabtagene autoleucel", {}).get(sheets.MEMBER_EMAIL_COL),
+          "s@example.org")
     check("a reworded owner header still carries",
-          got2.get("obecabtagene autoleucel", {}).get(sheets.OWNER_COL), "JC")
+          got3.get("obecabtagene autoleucel", {}).get(sheets.OWNER_COL), "JC")
 
     # The brand can change between runs; the INN in parentheses is the anchor.
     check("a renamed brand still matches its drug",
@@ -615,6 +648,31 @@ def test_contact_carry_forward(tmp):
           sheets._contact_key("B (plozasiran)"), False)
     check("a missing file is not an error", sheets._prior_contacts(
           os.path.join(tmp, "nope.xlsx")), {})
+
+
+def test_column_order():
+    """The sheet's columns, exactly as the editorial team specified them."""
+    import sheets
+    section("Outreach list column order")
+    check("ten columns", len(config.HOTLIST_COLUMNS), 10)
+    check("the order is as asked", config.HOTLIST_COLUMNS, [
+        "Drug name", "MOA", "Indication", "NDA/BLA number", "Approval date",
+        "Company name", "ClinPharm ASCPT Member", "ClinPharm ASCPT Member email",
+        "Clin pharm contact", "AE owner"])
+    # The member pair is only legible read across, so nothing may come between.
+    check("the member pair is adjacent",
+          config.HOTLIST_COLUMNS.index(sheets.MEMBER_EMAIL_COL)
+          - config.HOTLIST_COLUMNS.index(sheets.MEMBER_COL), 1)
+    check("Clin pharm contact comes before AE owner",
+          config.HOTLIST_COLUMNS.index(sheets.CONTACT_COL)
+          < config.HOTLIST_COLUMNS.index(sheets.OWNER_COL), True)
+    check("exactly one ASCPT-named pair, no third column",
+          [c for c in config.HOTLIST_COLUMNS if "ASCPT" in c],
+          [sheets.MEMBER_COL, sheets.MEMBER_EMAIL_COL])
+    check("every team column is carried forward",
+          [c for c in sheets.HUMAN_COLS if c not in config.HOTLIST_COLUMNS], [])
+    check("and they are the last four, in sheet order",
+          config.HOTLIST_COLUMNS[-4:], sheets.HUMAN_COLS)
 
 
 def test_invitation_drafts():
@@ -634,13 +692,15 @@ def test_invitation_drafts():
     row[cols.index("MOA")] = "A CD19-directed autologous CAR-T cell therapy."
     row[cols.index("NDA/BLA number")] = "BLA 125813"
     row[cols.index(sheets.OWNER_COL)] = "JC"
-    row[cols.index(sheets.ASCPT_COL)] = "Sanne de Jong"
+    row[cols.index(sheets.MEMBER_COL)] = "Sanne de Jong"
     html_out = sheets.build_invites_html([row], 2027, cols)
 
     check("the drug name appears", "obecabtagene autoleucel" in html_out, True)
     check("the company appears", "Autolus, Inc." in html_out, True)
     check("the ASCPT-sourced contact is used",
           "Sanne de Jong" in html_out, True)
+    check("and no choice is demanded for a single name",
+          "choose one before sending" in html_out, False)
     check("and it is not reported as needing lookup",
           "NEEDS LOOKUP" in html_out, False)
     check("the label MOA appears", "CD19-directed" in html_out, True)
@@ -656,6 +716,22 @@ def test_invitation_drafts():
           "NEEDS LOOKUP" in out2, True)
     check("and makes no promise to meet at ASCPT",
           "in person" in out2, False)
+
+    # The AE's own single choice outranks a member list, and a list of several
+    # members must not be silently reduced to its first name: a letter
+    # addressed to "1. Amita Joshi 2. Rong Shi" is worse than a blank one.
+    many = [""] * len(cols)
+    many[cols.index("Drug name")] = "Z (zdrug)"
+    many[cols.index(sheets.MEMBER_COL)] = "1. Amita Joshi\n2. Rong Shi"
+    out3 = sheets.build_invites_html([many], 2027, cols)
+    check("a multi-member cell asks for a choice",
+          "choose one before sending" in out3, True)
+    many[cols.index(sheets.CONTACT_COL)] = "Amita Joshi"
+    out4 = sheets.build_invites_html([many], 2027, cols)
+    check("an AE's single choice outranks the member list",
+          "choose one before sending" in out4, False)
+    check("and it is the name used", ">Amita Joshi<" in out4
+          or "Contact:</b> Amita Joshi" in out4, True)
 
 
 def _article(pmid, journal, authors_):
@@ -1006,16 +1082,31 @@ def test_member_column(tmp):
           "Clinical Pharmacology")
 
     names, emails, how = sheets.members_at_company("GENENTECH INC", recs)
-    check("every match is listed, not a sample", names.count("\n") + 1, 3)
+    check("every member at the company is listed", names.count("\n") + 1, 5)
     check("a person repeated across communities appears once",
           names.count("Amita Joshi"), 1)
     check("a comma in the company name does not block the match",
           "Rong Shi" in names, True)
-    check("Regulatory Affairs is excluded", "Chris Reg" in names, False)
-    # Different profession. An invitation to write a mechanism review landing on
-    # a hospital pharmacist is a wasted approach and a slightly insulting one.
-    check("Clinical Pharmacy is excluded", "Sam Pharm" in names, False)
-    check("the match count is reported", "3 match(es)" in how, True)
+
+    # The team asked to see everyone and judge for themselves, so a
+    # non-matching discipline is LABELLED rather than hidden. The label is what
+    # stops a regulatory contact reading as a clinical pharmacologist, and a
+    # hospital pharmacist is a different profession again.
+    check("a confirmed clin pharm name carries no label",
+          "Amita Joshi\n" in names + "\n", True)
+    check("Regulatory Affairs is shown, labelled",
+          "Chris Reg (Regulatory Affairs)" in names, True)
+    check("Clinical Pharmacy is shown, labelled",
+          "Sam Pharm (Clinical Pharmacy)" in names, True)
+
+    # Order matters: anyone labelled sorts after everyone who is not, so the
+    # top of the cell is always the people actually worth approaching.
+    lines = [l.split(". ", 1)[-1] for l in names.split("\n")]
+    first_labelled = next(i for i, l in enumerate(lines) if "(" in l)
+    check("labelled members sort after the unlabelled ones",
+          all("(" not in l for l in lines[:first_labelled]), True)
+    check("the counts are reported both ways",
+          "4 in clinical pharmacology" in how and "2 other" in how, True)
 
     # The two cells are read across, so a missing address must hold its place
     # rather than shift every line below it onto the wrong person.
@@ -1023,10 +1114,15 @@ def test_member_column(tmp):
     gap = next(i for i, v in enumerate(nl) if "Pat Noname" in v)
     check("a member with no address holds its place",
           el[gap].endswith("-"), True)
+    # Derived from the fixture rather than hardcoded, so the check still means
+    # something when the fixture changes: line N of one cell must be the
+    # address of the person named on line N of the other.
+    addr = {"Amita Joshi": "ajoshi@gene.com", "Rong Shi": "shi.rong@gene.com",
+            "Pat Noname": "-", "Chris Reg": "cr@gene.com",
+            "Sam Pharm": "sp@gene.com"}
+    want = [addr[re.sub(r"\s*\(.*\)$", "", n.split(". ", 1)[1])] for n in nl]
     check("and the addresses line up with the names",
-          [e.split(". ", 1)[1] for e in el],
-          ["ajoshi@gene.com" if "Joshi" in n else
-           "-" if "Noname" in n else "shi.rong@gene.com" for n in nl])
+          [e.split(". ", 1)[1] for e in el], want)
     check("and every line is numbered the same way",
           [l.split(".")[0] for l in names.split("\n")],
           [l.split(".")[0] for l in emails.split("\n")])
@@ -1035,6 +1131,14 @@ def test_member_column(tmp):
     n2, _e2, how2 = sheets.members_at_company("VERA THERAPEUTICS INC.", recs)
     check("Verastem is not matched to Vera Therapeutics", n2, "")
     check("and the row says why", how2, "no members at this company")
+
+    # A company with members but none in clinical pharmacology still lists
+    # them, all labelled, so the row is not silently empty.
+    n4, _e4, how4 = sheets.members_at_company("Verastem Oncology", recs)
+    check("a company with no clin pharm member still lists its people",
+          n4, "Lee Else")
+    check("...labelled only when the discipline does not match",
+          "none in clinical pharmacology" in how4 or n4 == "Lee Else", True)
 
     # An export with no discipline column must not silently claim everyone is a
     # clinical pharmacologist; it lists them and says the filter did not apply.
@@ -1053,19 +1157,34 @@ def test_member_column(tmp):
     check("translational medicine is", sheets.is_clinpharm("Translational"), True)
     check("a blank discipline is not", sheets.is_clinpharm(""), False)
 
-    # The engine's columns must stay out of the carry-forward. Their headers
-    # contain both "ascpt" and "member", so the loose matcher would otherwise
-    # land them on the manual directory column and overwrite a hand lookup.
-    check("the member column is not carried forward",
-          sheets._human_col(sheets.MEMBER_COL), None)
-    check("nor is the email column",
-          sheets._human_col(sheets.MEMBER_EMAIL_COL), None)
-    check("a reworded manual column still is, not mistaken for the engine's",
-          sheets._human_col("ASCPT member (clin pharm)"), sheets.ASCPT_COL)
-    check("no engine column is in HUMAN_COLS",
-          [c for c in sheets.ENGINE_COLS if c in sheets.HUMAN_COLS], [])
-    check("the sheet has both engine columns",
-          [c for c in sheets.ENGINE_COLS if c not in config.HOTLIST_COLUMNS], [])
+    # The member pair belongs to the team now, so it IS carried forward, and a
+    # typed value must survive a run that also has an export to draw on.
+    check("the member column is carried forward",
+          sheets._human_col(sheets.MEMBER_COL), sheets.MEMBER_COL)
+    check("so is the email column",
+          sheets._human_col(sheets.MEMBER_EMAIL_COL), sheets.MEMBER_EMAIL_COL)
+
+    typed = {sheets.MEMBER_COL: "someone I found myself",
+             sheets.MEMBER_EMAIL_COL: "me@example.org"}
+    cells = sheets._team_cells(typed, "GENENTECH INC", recs)
+    check("a typed member name is NOT overwritten by the export",
+          cells[0], "someone I found myself")
+    check("nor is the typed address", cells[1], "me@example.org")
+
+    # Half-typed is the case that would break the alignment between the two
+    # cells, so the engine leaves the pair alone if EITHER is filled.
+    half = sheets._team_cells({sheets.MEMBER_COL: "just a name"},
+                              "GENENTECH INC", recs)
+    check("a half-filled pair is left alone", half[0], "just a name")
+    check("and the engine does not fill the other half", half[1], "")
+
+    filled = sheets._team_cells({}, "GENENTECH INC", recs)
+    check("an empty pair IS filled from the export",
+          "Amita Joshi" in filled[0], True)
+    check("with the addresses alongside",
+          "ajoshi@gene.com" in filled[1], True)
+    check("and nothing is invented with no export",
+          sheets._team_cells({}, "GENENTECH INC", []), ["", "", "", ""])
 
     # No file at all is the state the team is in until ASCPT sends the export.
     real = config.members_file
@@ -1100,6 +1219,7 @@ def main():
         test_bundle_arg_dispatch(tmp)
         test_gui_endpoints(tmp)
         test_python_floor(tmp)
+        test_column_order()
         test_contact_carry_forward(tmp)
         test_invitation_drafts()
         test_member_column(tmp)

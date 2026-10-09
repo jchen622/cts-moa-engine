@@ -363,42 +363,55 @@ Highlights), and a child section may be "Limitations of Use" rather than an indi
 ## The outreach list is the only outreach output
 
 `dossier` was retired on 2026-10-08. `hotlist` writes
-`output/MOA outreach list <date>.xlsx`, one file per date, with eleven columns
-(`config.HOTLIST_COLUMNS`): Drug name, MOA, Indication, NDA/BLA number, Approval date,
-Company name, **AE owner**, **Clin pharm contact**, **ClinPharm contact from ASCPT Membership
-Directory**, *ClinPharm ASCPT Member*, *ClinPharm ASCPT Member email*.
+`output/MOA outreach list <date>.xlsx`, one file per date, with ten columns
+(`config.HOTLIST_COLUMNS`) in this order:
 
-**Columns 7 to 9 are the team's and the engine must never write to them.** They are the
-question being put to the AE team, and they ship blank on every run.
+| # | Column | Owner |
+|---|---|---|
+| 1-6 | Drug name, MOA, Indication, NDA/BLA number, Approval date, Company name | engine |
+| 7 | ClinPharm ASCPT Member | team |
+| 8 | ClinPharm ASCPT Member email | team |
+| 9 | Clin pharm contact | team |
+| 10 | AE owner | team |
 
-**Columns 10 and 11 are the only ones the engine fills**, from an ASCPT membership export the
-team imports (`roster --kind members`, stored at `input/ascpt members.xlsx`, or the upload card
-in the GUI). They list EVERY matching member rather than a sample, numbered, and are
-**index-aligned**: line 3 of one is the address of line 3 of the other, and a member with no
-address renders as `-` so a gap cannot shift every line below it onto the wrong person.
-Company matching is `authors._is_sponsor` (it knows Verastem Oncology is not Vera
-Therapeutics); the clin pharm filter is `config.CLINPHARM_DISCIPLINES` and deliberately
-excludes "clinical pharmacy", a different profession. With no export imported both columns are
-blank and the console and the Methodology sheet say so, so a blank column never reads as "no
-members at any of these companies".
+**All four of the last columns belong to the team and all four carry forward.** They ship
+blank. Columns 7 and 8 were engine-only until 2026-10-08, when the team decided to fill them
+in by hand; carrying them forward stopped being optional at that moment, because a run that
+regenerated those cells would have handed back a blank sheet.
 
-**`sheets._human_col()` matches the engine's two columns EXACTLY and everything else loosely,
-and that asymmetry is deliberate.** Their headers contain both "ascpt" and "member", so the
-loose rules would otherwise classify them as the manual directory column, carry a regenerated
-value forward, and overwrite a hand lookup. The two ways of being wrong are not equally bad:
-treating a human column as the engine's loses typed work silently, while treating the engine's
-as human at worst carries one derived name forward. So anything that is not the exact engine
-header falls through to the human rules.
+**A typed value always wins.** If an ASCPT membership export has been imported, the engine
+fills the pair too, but only where BOTH cells came back empty (`sheets._team_cells()`). The
+pair is filled or left alone together: filling a name while keeping a typed address would break
+the index alignment and put one person's name against another's address.
 
-**The engine still does not query the ASCPT directory.** The member data arrives only as a
-file the user is entitled to supply. ASCPT staff gave a verbal exception on 2026-10-08; the
-written request for a formal export is drafted at `output/ASCPT membership export request.md`
-and asks for name, institution, country, discipline and email. Do not add a scraper, and do
-not use the credentials that appear earlier in this project's transcripts.
+**Columns 7 and 8 are index-aligned.** Line 3 of one is the address of line 3 of the other, and
+a member with no address renders as `-` rather than being dropped. Every member at the company
+is listed, with any non-clinical-pharmacology discipline in parentheses and sorted after the
+unlabelled ones, so a regulatory contact can never read as a clinical pharmacologist. Company
+matching is `authors._is_sponsor` (Verastem Oncology is not Vera Therapeutics); the filter is
+`config.CLINPHARM_DISCIPLINES`, which excludes "clinical pharmacy", a different profession.
 
-**`invites` accepts a contact from either of the team's two contact columns**, since both are
-a human naming a real person. It does NOT draft from the engine-filled member columns: those
-are candidates to choose between, not a decision. Blank in both means no letter, and it reports how many were skipped.
+**There used to be a third ASCPT column**, a hand-filled
+`ClinPharm contact from ASCPT Membership Directory` beside the engine-filled pair. It was
+redundant and the team cut it on 2026-10-08. `sheets._human_col()` maps that retired header onto
+`MEMBER_COL`, so a value typed under it migrates rather than disappearing. **The test order in
+`_human_col()` is load-bearing**: email before ASCPT before owner before contact, because the
+retired header contains both "ascpt" and "contact" and the member email header contains both
+"ascpt" and "email". Reorder those branches and values silently land in the wrong column.
+
+**The engine does not query the ASCPT directory and stores no credential for it.** Member data
+arrives only as a file someone entitled to it supplies (`roster --kind members`, or the GUI
+upload card). ASCPT staff granted a verbal exception on 2026-10-08 and the user reported written
+consent; neither changes this, because the objection is to collecting several hundred members'
+addresses by automation rather than to the permission. The written request for a formal export
+is at `output/ASCPT membership export request.md`. Do not add a scraper, and do not use the
+credentials that appear earlier in this project's transcripts.
+
+**`invites` drafts from `sheets.CONTACT_SOURCES`**, which is `Clin pharm contact` then
+`ClinPharm ASCPT Member`, in that preference order: the former is an AE's deliberate single
+choice, the latter may hold several candidates. A cell holding a numbered list of several
+members does not silently become the first name; `sheets.letter_contact()` returns a
+needs-narrowing flag and the draft says a choice is still required. Blank in both means no letter, and it reports how many were skipped.
 
 **Carrying the three columns forward is load-bearing.** One file per date means a run
 overwrites, so `sheets._prior_contacts()` reads today's file if it exists and otherwise the most
