@@ -969,6 +969,116 @@ def test_bundle_module_list(tmp):
     check("rxclass specifically is bundled", "rxclass" in declared, True)
 
 
+def test_member_column(tmp):
+    """The two engine-filled columns, from an imported ASCPT export.
+
+    Every edge here came from a real export's shape: a person repeated across
+    communities, a lookalike company, a member with no address, and a
+    "Clinical Pharmacy" member who is a different profession.
+    """
+    section("ClinPharm ASCPT Member, from the imported membership list")
+    import sheets
+
+    rows = [["First Name", "Last Name", "Company", "Primary Discipline",
+             "Email", "Member Since"],
+            ["Amita", "Joshi", "Genentech, Inc.", "Clinical Pharmacology",
+             "ajoshi@gene.com", "2015"],
+            ["Amita", "Joshi", "Genentech, Inc.", "Pharmacometrics",
+             "ajoshi@gene.com", "2015"],
+            ["Rong", "Shi", "Genentech Inc", "Clinical Pharmacology", 
+             "shi.rong@gene.com", "2018"],
+            ["Pat", "Noname", "Genentech, Inc.", "Clinical Pharmacology", "", "2020"],
+            ["Chris", "Reg", "Genentech, Inc.", "Regulatory Affairs",
+             "cr@gene.com", "2019"],
+            ["Sam", "Pharm", "Genentech, Inc.", "Clinical Pharmacy",
+             "sp@gene.com", "2021"],
+            ["Lee", "Else", "Verastem Oncology", "Clinical Pharmacology",
+             "lee@verastem.com", "2022"],
+            ["", "NoOrg", "", "Clinical Pharmacology", "x@y.com", "2022"]]
+    p = store.xlsx_write(os.path.join(tmp, "ascpt members.xlsx"),
+                         {"Members": rows})
+
+    check("recognised as a member directory", sheets.looks_like_members(p), True)
+    recs = sheets.load_member_records(p)
+    check("the row with no organisation is dropped", len(recs), 7)
+    check("the email column is read", recs[0].get("email"), "ajoshi@gene.com")
+    check("the discipline column is read", recs[0].get("discipline"),
+          "Clinical Pharmacology")
+
+    names, emails, how = sheets.members_at_company("GENENTECH INC", recs)
+    check("every match is listed, not a sample", names.count("\n") + 1, 3)
+    check("a person repeated across communities appears once",
+          names.count("Amita Joshi"), 1)
+    check("a comma in the company name does not block the match",
+          "Rong Shi" in names, True)
+    check("Regulatory Affairs is excluded", "Chris Reg" in names, False)
+    # Different profession. An invitation to write a mechanism review landing on
+    # a hospital pharmacist is a wasted approach and a slightly insulting one.
+    check("Clinical Pharmacy is excluded", "Sam Pharm" in names, False)
+    check("the match count is reported", "3 match(es)" in how, True)
+
+    # The two cells are read across, so a missing address must hold its place
+    # rather than shift every line below it onto the wrong person.
+    nl, el = names.split("\n"), emails.split("\n")
+    gap = next(i for i, v in enumerate(nl) if "Pat Noname" in v)
+    check("a member with no address holds its place",
+          el[gap].endswith("-"), True)
+    check("and the addresses line up with the names",
+          [e.split(". ", 1)[1] for e in el],
+          ["ajoshi@gene.com" if "Joshi" in n else
+           "-" if "Noname" in n else "shi.rong@gene.com" for n in nl])
+    check("and every line is numbered the same way",
+          [l.split(".")[0] for l in names.split("\n")],
+          [l.split(".")[0] for l in emails.split("\n")])
+
+    # The company test is authors._is_sponsor, which knows these two apart.
+    n2, _e2, how2 = sheets.members_at_company("VERA THERAPEUTICS INC.", recs)
+    check("Verastem is not matched to Vera Therapeutics", n2, "")
+    check("and the row says why", how2, "no members at this company")
+
+    # An export with no discipline column must not silently claim everyone is a
+    # clinical pharmacologist; it lists them and says the filter did not apply.
+    plain = [["Name", "Organization"], ["A Person", "Autolus, Inc."]]
+    p2 = store.xlsx_write(os.path.join(tmp, "plain.xlsx"), {"S": plain})
+    n3, _e3, how3 = sheets.members_at_company(
+        "Autolus, Inc.", sheets.load_member_records(p2))
+    check("with no discipline column the member is still listed", n3, "A Person")
+    check("and the cell says the filter did not apply",
+          "no discipline" in how3, True)
+    check("and that no address was available",
+          "no email column" in how3, True)
+
+    check("clinical pharmacy alone is not clin pharm",
+          sheets.is_clinpharm("Clinical Pharmacy"), False)
+    check("translational medicine is", sheets.is_clinpharm("Translational"), True)
+    check("a blank discipline is not", sheets.is_clinpharm(""), False)
+
+    # The engine's columns must stay out of the carry-forward. Their headers
+    # contain both "ascpt" and "member", so the loose matcher would otherwise
+    # land them on the manual directory column and overwrite a hand lookup.
+    check("the member column is not carried forward",
+          sheets._human_col(sheets.MEMBER_COL), None)
+    check("nor is the email column",
+          sheets._human_col(sheets.MEMBER_EMAIL_COL), None)
+    check("a reworded manual column still is, not mistaken for the engine's",
+          sheets._human_col("ASCPT member (clin pharm)"), sheets.ASCPT_COL)
+    check("no engine column is in HUMAN_COLS",
+          [c for c in sheets.ENGINE_COLS if c in sheets.HUMAN_COLS], [])
+    check("the sheet has both engine columns",
+          [c for c in sheets.ENGINE_COLS if c not in config.HOTLIST_COLUMNS], [])
+
+    # No file at all is the state the team is in until ASCPT sends the export.
+    real = config.members_file
+    try:
+        config.members_file = lambda: os.path.join(tmp, "nope.xlsx")
+        got, note = sheets._member_records()
+        check("no membership file is not an error", got, [])
+        check("and the blank column is explained", "no ASCPT membership list" in note,
+              True)
+    finally:
+        config.members_file = real
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="moa-selftest-")
     print(f"Self-test — local file layer. Scratch dir: {tmp}")
@@ -992,6 +1102,7 @@ def main():
         test_python_floor(tmp)
         test_contact_carry_forward(tmp)
         test_invitation_drafts()
+        test_member_column(tmp)
         test_clinpharm_tier1()
         test_clinpharm_acquisition_and_drift()
         test_clinpharm_dose_escalation()

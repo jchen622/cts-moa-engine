@@ -119,6 +119,26 @@ MEMBER_ONLY_COLUMNS = ("member since", "membership type", "member id",
                        "member type", "membership status", "join date",
                        "member number", "community", "communities")
 
+# Where a membership export states what someone works on. ASCPT's own term is
+# "community"; other exports call it a discipline or an area of interest.
+MEMBER_DISCIPLINE_COLUMNS = ("primary discipline", "discipline", "community",
+                             "communities", "area of interest",
+                             "areas of interest", "interest area", "specialty",
+                             "speciality", "focus area", "primary focus")
+
+# What counts as clinical pharmacology for the purpose of that column. Written
+# out rather than inferred so the filter can be argued with, and deliberately
+# NOT including "clinical pharmacy", which is a different profession.
+CLINPHARM_DISCIPLINES = ("clinical pharmacolog", "translational", "pharmacometric",
+                         "pharmacokinetic", "pharmacodynamic", "pk/pd", "pkpd",
+                         "quantitative pharmacolog", "drug metabolism",
+                         "drug disposition", "dmpk", "model-informed",
+                         "exposure-response", "clinical pharmacology")
+
+# Where a membership export states an address.
+MEMBER_EMAIL_COLUMNS = ("email", "e-mail", "email address", "e-mail address",
+                        "primary email", "work email", "business email")
+
 
 def ncbi_email():
     """Contact address sent to NCBI E-utilities, if the user supplies one.
@@ -193,10 +213,21 @@ def dossier_name(year):
 # never writes a value into any of them, on any run. The ASCPT column is
 # deliberately manual: the member directory is behind a login and its terms do
 # not permit scraping, so an AE looks the person up and types the name in.
+# The last TWO are the engine's and are index-aligned: name 2 in one cell is
+# the person whose address is line 2 of the other, so the pair can be read
+# across. Every match is listed, not a sample, because a company can have
+# several clinical pharmacologists and picking one for the editor is not the
+# engine's call.
+# "ClinPharm ASCPT Member" is the one contact-ish column the ENGINE fills. It
+# is populated from an ASCPT membership export the user imports with
+# `roster --kind members`, and it is blank until one exists. Keep it last and
+# keep it distinct from the manual directory column beside it: that one is a
+# lookup an AE did by hand, and nothing regenerated must ever overwrite it.
 HOTLIST_COLUMNS = [
     "Drug name", "MOA", "Indication", "NDA/BLA number", "Approval date",
     "Company name", "AE owner", "Clin pharm contact",
     "ClinPharm contact from ASCPT Membership Directory",
+    "ClinPharm ASCPT Member", "ClinPharm ASCPT Member email",
 ]
 
 # The gap analysis still decides what is on the list and still drives the

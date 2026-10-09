@@ -363,22 +363,42 @@ Highlights), and a child section may be "Limitations of Use" rather than an indi
 ## The outreach list is the only outreach output
 
 `dossier` was retired on 2026-10-08. `hotlist` writes
-`output/MOA outreach list <date>.xlsx`, one file per date, with nine columns
+`output/MOA outreach list <date>.xlsx`, one file per date, with eleven columns
 (`config.HOTLIST_COLUMNS`): Drug name, MOA, Indication, NDA/BLA number, Approval date,
 Company name, **AE owner**, **Clin pharm contact**, **ClinPharm contact from ASCPT Membership
-Directory**.
+Directory**, *ClinPharm ASCPT Member*, *ClinPharm ASCPT Member email*.
 
-**The last three are the team's and the engine must never write to them.** They are the
+**Columns 7 to 9 are the team's and the engine must never write to them.** They are the
 question being put to the AE team, and they ship blank on every run.
 
-**The ASCPT column is manual by design, not by omission.** The Membership Directory is behind
-a member login and its terms do not permit compiling it into a list, so the engine does not
-query it: an AE looks a person up and types the name in. Do not add a scraper, and do not use
-the credentials that appear earlier in this project's transcripts. `roster` remains the
-supported path for ASCPT data: the user uploads an export they are entitled to.
+**Columns 10 and 11 are the only ones the engine fills**, from an ASCPT membership export the
+team imports (`roster --kind members`, stored at `input/ascpt members.xlsx`, or the upload card
+in the GUI). They list EVERY matching member rather than a sample, numbered, and are
+**index-aligned**: line 3 of one is the address of line 3 of the other, and a member with no
+address renders as `-` so a gap cannot shift every line below it onto the wrong person.
+Company matching is `authors._is_sponsor` (it knows Verastem Oncology is not Vera
+Therapeutics); the clin pharm filter is `config.CLINPHARM_DISCIPLINES` and deliberately
+excludes "clinical pharmacy", a different profession. With no export imported both columns are
+blank and the console and the Methodology sheet say so, so a blank column never reads as "no
+members at any of these companies".
 
-**`invites` accepts a contact from EITHER contact column**, since both are a human naming a
-real person. Blank in both means no letter, and it reports how many were skipped.
+**`sheets._human_col()` matches the engine's two columns EXACTLY and everything else loosely,
+and that asymmetry is deliberate.** Their headers contain both "ascpt" and "member", so the
+loose rules would otherwise classify them as the manual directory column, carry a regenerated
+value forward, and overwrite a hand lookup. The two ways of being wrong are not equally bad:
+treating a human column as the engine's loses typed work silently, while treating the engine's
+as human at worst carries one derived name forward. So anything that is not the exact engine
+header falls through to the human rules.
+
+**The engine still does not query the ASCPT directory.** The member data arrives only as a
+file the user is entitled to supply. ASCPT staff gave a verbal exception on 2026-10-08; the
+written request for a formal export is drafted at `output/ASCPT membership export request.md`
+and asks for name, institution, country, discipline and email. Do not add a scraper, and do
+not use the credentials that appear earlier in this project's transcripts.
+
+**`invites` accepts a contact from either of the team's two contact columns**, since both are
+a human naming a real person. It does NOT draft from the engine-filled member columns: those
+are candidates to choose between, not a decision. Blank in both means no letter, and it reports how many were skipped.
 
 **Carrying the three columns forward is load-bearing.** One file per date means a run
 overwrites, so `sheets._prior_contacts()` reads today's file if it exists and otherwise the most

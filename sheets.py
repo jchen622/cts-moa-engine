@@ -396,14 +396,14 @@ def load_members(path, tab=None):
     return out
 
 
-def load_roster(path, tab=None):
-    """Read an attendee export into [{'name', 'org'}].
+def load_roster_rows(rows, require_rows=True):
+    """The parsing half of load_roster, for rows already in memory.
 
-    Raises RosterError when there is no organisation column: without one
-    nothing can be tied back to a drug's sponsor, and silently returning an
-    empty roster would look like "nobody is attending".
+    Split out so load_member_records can parse one row at a time and keep its
+    records aligned with the sheet. Zipping the two sequences did not work:
+    load_roster drops rows with no organisation, so the pairing silently
+    shifted every record after the first blank.
     """
-    rows = store.xlsx_read(path, tab) or store.xlsx_read(path)
     if len(rows) < 2:
         raise RosterError("the file has no data rows")
     hdr = rows[0]
@@ -437,9 +437,121 @@ def load_roster(path, tab=None):
         else:
             name = cell(r, name_i)
         out.append({"name": name, "org": org})
-    if not out:
+    if not out and require_rows:
         raise RosterError("no rows had an organisation filled in")
     return out
+
+
+def load_roster(path, tab=None):
+    """Read an attendee export into [{'name', 'org'}].
+
+    Raises RosterError when there is no organisation column: without one
+    nothing can be tied back to a drug's sponsor, and silently returning an
+    empty roster would look like "nobody is attending".
+    """
+    return load_roster_rows(store.xlsx_read(path, tab) or store.xlsx_read(path))
+
+
+def load_member_records(path, tab=None):
+    """An ASCPT membership export -> [{'name', 'org', 'discipline'}].
+
+    `load_members()` keys people to their organisation, which answers "is this
+    author an ASCPT member?". The outreach list asks the opposite question,
+    "which members work at this company?", so the records are kept whole here
+    and the discipline comes with them when the export carries one.
+    """
+    rows = store.xlsx_read(path, tab) or store.xlsx_read(path)
+    if len(rows) < 2:
+        raise RosterError("the file has no data rows")
+    disc_i = _find_column(rows[0], config.MEMBER_DISCIPLINE_COLUMNS)
+    mail_i = _find_column(rows[0], config.MEMBER_EMAIL_COLUMNS)
+
+    def cell(row, i):
+        return row[i].strip() if i is not None and i < len(row) else ""
+
+    out = []
+    # load_roster drops any row with no organisation, so the two sequences
+    # would drift apart if they were zipped. It is re-run per row here instead.
+    for row in rows[1:]:
+        people = load_roster_rows([rows[0], row], require_rows=False)
+        if not people:
+            continue
+        person = dict(people[0])
+        person["discipline"] = cell(row, disc_i)
+        person["email"] = cell(row, mail_i)
+        out.append(person)
+    return out
+
+
+def is_clinpharm(discipline):
+    """Does this stated discipline put someone in clinical pharmacology?
+
+    "clinical pharmacy" is deliberately not a match. It is a different
+    profession, and an invitation to write a mechanism review that lands on a
+    hospital pharmacist is a wasted approach and a slightly insulting one.
+    """
+    d = (discipline or "").lower()
+    if not d:
+        return False
+    if "clinical pharmacy" in d and "pharmacolog" not in d:
+        return False
+    return any(t in d for t in config.CLINPHARM_DISCIPLINES)
+
+
+def members_at_company(sponsor, records):
+    """-> (names cell, emails cell, how_matched) for one company's row.
+
+    Every match is listed, numbered, and the two cells are index-aligned so
+    line 3 of one is the address of line 3 of the other. A company can have
+    several clinical pharmacologists and choosing between them is the editor's
+    judgement, not the engine's.
+
+    Company matching is `authors._is_sponsor`, which is already the tested one:
+    it knows Verastem is not Vera Therapeutics, and that an affiliation string
+    carries a city and a country the sponsor field does not.
+    """
+    import authors                       # local: authors imports sheets
+    if not sponsor or not records:
+        return "", "", ""
+    at = [r for r in records if authors._is_sponsor(r.get("org", ""), sponsor)]
+    if not at:
+        return "", "", "no members at this company"
+
+    # Filter to clinical pharmacology only where the export says. An export
+    # with no discipline column must not silently return every employee as a
+    # clinical pharmacologist, so the cell says what it is showing.
+    stated = [r for r in at if r.get("discipline")]
+    if stated:
+        cp = [r for r in stated if is_clinpharm(r["discipline"])]
+        if not cp:
+            return "", "", f"{len(at)} member(s) here, none in clinical pharmacology"
+        how = "ASCPT member, discipline stated as clinical pharmacology"
+    else:
+        cp = at
+        how = "ASCPT member at this company; export states no discipline"
+
+    # Deduplicated on the name, keeping the first address seen for each. A
+    # directory export repeats a person across communities, and listing someone
+    # three times reads as three different people at the same company.
+    seen = {}
+    for r in cp:
+        nm = (r.get("name") or "").strip()
+        if nm and nm not in seen:
+            seen[nm] = (r.get("email") or "").strip()
+    if not seen:
+        return "", "", f"{len(at)} member(s) here, none with a usable name"
+    people = sorted(seen.items())
+
+    def listed(values):
+        if len(values) == 1:
+            return values[0]
+        return "\n".join(f"{i}. {v or '-'}" for i, v in enumerate(values, 1))
+
+    how += f"; {len(people)} match(es)"
+    if not any(e for _n, e in people):
+        how += "; export carries no email column"
+    return (listed([n for n, _e in people]),
+            listed([e for _n, e in people]), how)
 
 
 def _index_people(pairs):
@@ -869,7 +981,8 @@ def write_invites(year, rows, columns=None, dry_run=True):
 
 
 # ---------------------------------------------------------------- hot list
-def _hotlist_methodology(report, months, top, considered, shown, listed=None):
+def _hotlist_methodology(report, months, top, considered, shown, listed=None,
+                         member_note=""):
     """Sheet 2. Written so a weight can be argued with, not just trusted."""
     L = lambda *c: list(c)
     rows = [L("How this list was built", "")]
@@ -892,6 +1005,33 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None):
                                             "a list. An AE looks a person up and "
                                             "types the name in; the engine does not "
                                             "query it."),
+        L("The last two columns", "'ClinPharm ASCPT Member' and 'ClinPharm ASCPT "
+                                  "Member email' are the only ones the ENGINE "
+                                  "fills. They list EVERY ASCPT member whose "
+                                  "organisation matches the company, filtered to "
+                                  "clinical pharmacology where the export states a "
+                                  "discipline, numbered and index-aligned so line 3 "
+                                  "of one is the address of line 3 of the other. "
+                                  "Both are regenerated on every run and NEITHER is "
+                                  "carried forward, so do not type into them: use "
+                                  "'Clin pharm contact' instead."),
+        L("Where that list comes from", "An ASCPT membership export the team "
+                                        "imports with 'roster --kind members', "
+                                        "stored at input/" + config.MEMBERS_FILE +
+                                        ". The engine does not query the ASCPT "
+                                        "directory itself."),
+        L("Membership list status", member_note or "not checked"),
+        L("Company matching", "authors._is_sponsor, the same test used for author "
+                              "affiliations. It knows Verastem Oncology is not "
+                              "Vera Therapeutics, which a substring match does not."),
+        L("Clinical pharmacology filter", "Matched on the stated discipline against "
+                                          + str(len(config.CLINPHARM_DISCIPLINES)) +
+                                          " terms in config.CLINPHARM_DISCIPLINES. "
+                                          "'Clinical pharmacy' is deliberately NOT "
+                                          "a match: different profession. Where the "
+                                          "export states no discipline, every "
+                                          "member at the company is listed and the "
+                                          "status row above says so."),
         L("Re-runs are safe", "Anything typed into those three columns is carried "
                               "forward onto the next run, keyed on the drug rather "
                               "than the row, because the ranking changes between "
@@ -1012,6 +1152,10 @@ HOTLIST_TAB = "Outreach list"
 CONTACT_COL = "Clin pharm contact"
 ASCPT_COL = "ClinPharm contact from ASCPT Membership Directory"
 OWNER_COL = "AE owner"
+MEMBER_COL = "ClinPharm ASCPT Member"
+MEMBER_EMAIL_COL = "ClinPharm ASCPT Member email"
+# Both of these are the engine's. Neither is carried forward.
+ENGINE_COLS = [MEMBER_COL, MEMBER_EMAIL_COL]
 
 # The three columns the team owns. The engine writes a value into none of them
 # on any run; it only ever copies forward what was already typed in.
@@ -1034,6 +1178,10 @@ def _appl_label(rec):
     return f"{kind} {no}"
 
 
+def _norm_header(h):
+    return re.sub(r"[^a-z]+", " ", (h or "").lower()).strip()
+
+
 def _human_col(header):
     """Which of the team's columns is this header, if any?
 
@@ -1046,6 +1194,20 @@ def _human_col(header):
     h = re.sub(r"[^a-z]+", " ", (header or "").lower()).strip()
     if not h:
         return None
+    # The engine's two columns must not be carried forward. Tested FIRST,
+    # because the ASCPT rule below would otherwise swallow them: their headers
+    # contain both "ascpt" and "member". That would land a regenerated value on
+    # the same key as the manual directory column and overwrite a lookup an AE
+    # did by hand.
+    #
+    # Matched EXACTLY, where every other rule here is loose, and the asymmetry
+    # is deliberate. A reworded header is ambiguous between these two columns,
+    # and the two ways of being wrong are not equally bad: treating a human
+    # column as the engine's loses typed work silently, while treating the
+    # engine's as human at worst carries one derived name forward. So anything
+    # that is not this exact header falls through to the human rules.
+    if _norm_header(h) in {_norm_header(c) for c in ENGINE_COLS}:
+        return None
     if "ascpt" in h:
         return ASCPT_COL
     if "owner" in h:
@@ -1053,6 +1215,31 @@ def _human_col(header):
     if "contact" in h:
         return CONTACT_COL
     return None
+
+
+def _member_records():
+    """The imported ASCPT membership export, or none. -> (records, note)
+
+    Optional in every direction. No file, an unreadable file or a file with no
+    organisation column all return an empty list and a note saying why, because
+    the tenth column being blank for a bad reason must be visible rather than
+    look like "no members at any of these companies".
+    """
+    path = config.members_file()
+    if not os.path.exists(path):
+        return [], ("no ASCPT membership list imported, so '" + MEMBER_COL
+                    + "' is blank (import one with: roster --kind members)")
+    try:
+        recs = load_member_records(path)
+    except Exception as e:
+        return [], f"could not read {os.path.basename(path)} ({e})"
+    if not recs:
+        return [], f"{os.path.basename(path)} has no usable rows"
+    n_disc = sum(1 for r in recs if r.get("discipline"))
+    note = f"{len(recs)} ASCPT member(s) imported"
+    note += (f", {n_disc} with a stated discipline" if n_disc
+             else ", none with a stated discipline so no clin pharm filter applies")
+    return recs, note
 
 
 def _prior_contacts(path):
@@ -1118,6 +1305,9 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
     # Carry forward whatever the team has already filled in: from today's file
     # if this is a re-run, otherwise from the most recent earlier one.
     carried = _prior_contacts(path) or _prior_contacts(config.latest_hotlist_path())
+    # The membership export, if the user has imported one. Entirely optional:
+    # with no file the tenth column is blank and everything else is unchanged.
+    members, member_note = _member_records()
     # Hand-added drugs ADD to the priority block; they do not take one of its
     # places. A typed drug carries an editorial judgement the score cannot, so
     # letting it displace a high-scoring candidate would lose information.
@@ -1156,6 +1346,10 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
                 # in any of them.
                 *[carried.get(_contact_key(drug), {}).get(c, "")
                   for c in HUMAN_COLS],
+                # The last two are the engine's, regenerated every run from
+                # the imported membership list and index-aligned with each
+                # other so the pair reads across.
+                *members_at_company(r.get("sponsor_raw", ""), members)[:2],
             ])
             if priority:
                 highlight.add(len(rows))
@@ -1172,7 +1366,8 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
     tabs = {HOTLIST_TAB: rows,
             "Methodology": _hotlist_methodology(report, months, top,
                                                 len(records), len(ranked),
-                                                listed=manual + ranked)}
+                                                listed=manual + ranked,
+                                                member_note=member_note)}
     store.xlsx_write(path, tabs, highlight={HOTLIST_TAB: highlight},
                      banner={HOTLIST_TAB: banner})
     if verbose:
@@ -1186,5 +1381,10 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
               f"= {len(manual) + len(ranked)} rows")
         if kept:
             print(f"    carried forward {kept} contact(s) already filled in")
+        mi = header.index(MEMBER_COL)
+        hit = sum(1 for row in rows[1:]
+                  if mi < len(row) and (row[mi] or "").strip())
+        print(f"    {member_note}"
+              + (f"; matched on {hit} row(s)" if members else ""))
         print(f"    -> {path}")
     return path

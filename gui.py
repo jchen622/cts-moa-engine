@@ -243,8 +243,8 @@ def watchdog(srv):
         quiet = (time.monotonic() - last) if last else (time.monotonic() - started)
         limit = HEARTBEAT_TIMEOUT if last else HEARTBEAT_GRACE
         if quiet > limit:
-            print("\nBrowser window closed — shutting down." if last
-                  else "\nNo browser connected — shutting down.")
+            print("\nBrowser window closed. Shutting down." if last
+                  else "\nNo browser connected. Shutting down.")
             srv.shutdown()
             return
 
@@ -319,7 +319,7 @@ mini&#8209;review. Work down the list.</p>
 
 <div class="step"><div class="num">3</div><div class="body">
  <div class="title">Update my candidate list</div>
- <div class="desc">Adds any newly approved drugs to your list. Safe to run as often as you like &mdash;
+ <div class="desc">Adds any newly approved drugs to your list. Safe to run as often as you like,
  it never adds the same drug twice, and never touches what you have typed in.</div>
  <div class="tag w">Saves to your results folder &middot; a couple of minutes</div>
 </div><button data-a="update">Update</button></div>
@@ -329,11 +329,11 @@ mini&#8209;review. Work down the list.</p>
  <div class="desc">Drugs with a <b>novel mechanism the mini-review series has not
  covered</b>, with the mechanism of action and approved indications from the FDA
  label. The top 20 are highlighted; 30 more follow. The <b>clin pharm contact
- column is left blank on purpose</b> &mdash; that is the column for the AE team
+ column is left blank on purpose</b>: that is the column for the AE team
  to fill in. Anything already filled in is carried over.</div>
  <div class="desc" id="whopulled" style="margin-top:8px"></div>
  <div class="desc" style="margin-top:10px"><b>Drugs you want included anyway</b>
-  &mdash; one per line, brand or generic. These are added to the top 20 rather
+  (one per line, brand or generic). These are added to the top 20 rather
   than taking its places, and they can be any age, so an older drug of interest
   is fine. The engine fills in the mechanism, indications and application number.</div>
  <div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">
@@ -357,16 +357,18 @@ Ozempic"
 
 <div class="step"><div class="num">+</div><div class="body">
  <div class="title">Add a file that helps you reach people
- <span style="font-weight:400;color:var(--dim)">&mdash; optional</span></div>
+ <span style="font-weight:400;color:var(--dim)">(optional)</span></div>
  <div class="desc">The goal is getting to the right clinical pharmacologist. Step&nbsp;4
  already finds them from the published literature; these just add more ways to reach
  them. Drop in any of the following and the tool works out which it is:</div>
  <div class="desc" style="margin-top:8px">
- &bull; an <b>ASCPT member directory</b> export &mdash; flags which of them are members<br>
+ &bull; an <b>ASCPT member directory</b> export: fills the last two columns of the
+ outreach list with every ASCPT clinical pharmacologist at each company, and their
+ email addresses<br>
  &bull; the <b>membership check list</b> the tool writes, once you have filled it in<br>
- &bull; an <b>attendee list</b> for the <span class="yr">upcoming</span> meeting &mdash;
+ &bull; an <b>attendee list</b> for the <span class="yr">upcoming</span> meeting:
  says who is registered, by name<br>
- &bull; the <b>programme export</b> &mdash; adds poster numbers and times</div>
+ &bull; the <b>programme export</b>: adds poster numbers and times</div>
  <div class="desc" id="haveatt" style="margin-top:8px"></div>
  <div class="tag">A .xlsx with a name column and an organisation column</div>
 </div><button class="safe" data-a="roster">Choose file&hellip;</button></div>
@@ -395,7 +397,7 @@ Ozempic"
 
 <div class="foot">
  <div style="display:flex;gap:14px;align-items:center;justify-content:space-between">
-  <div style="flex:1">Everything stays on this computer. <b>No email is ever sent</b> &mdash; the
+  <div style="flex:1">Everything stays on this computer. <b>No email is ever sent</b>. The
   letters are written to a file for you to read, edit and send yourself.<br>
   <span style="font-size:12px">Closing this tab stops the app automatically.</span></div>
   <button class="safe" id="quit" style="border-color:var(--dim);color:var(--dim)">Quit</button>
@@ -589,8 +591,8 @@ fetch('/where?t=' + encodeURIComponent(T)).then(r => r.json()).then(d => {{
   document.querySelectorAll('.yr').forEach(e => e.textContent = 'ASCPT ' + d.year);
 
   const src = [];
-  if (d.have_program)   src.push('the <b>ASCPT ' + d.year + '</b> programme &mdash; posters, times and rooms');
-  if (d.have_attendees) src.push('the <b>ASCPT ' + d.year + '</b> attendee list &mdash; who is registered');
+  if (d.have_program)   src.push('the <b>ASCPT ' + d.year + '</b> programme (posters, times and rooms)');
+  if (d.have_attendees) src.push('the <b>ASCPT ' + d.year + '</b> attendee list (who is registered)');
   if (d.history.length) src.push('who attended <b>ASCPT ' +
       d.history.join('</b> and <b>ASCPT ') + '</b>, as a guide to who is likely back');
 
@@ -604,7 +606,7 @@ fetch('/where?t=' + encodeURIComponent(T)).then(r => r.json()).then(d => {{
     : 'You do not have one yet. Until you do, step 4 falls back to ' +
       (d.history.length
         ? 'who attended <b>ASCPT ' + d.history[0] + '</b>.'
-        : 'nothing &mdash; there is no earlier meeting on file either.');
+        : 'nothing: there is no earlier meeting on file either.');
 }});
 </script></body></html>"""
 
@@ -786,7 +788,7 @@ def main():
     print("A window should open in your web browser.")
     print("If it does not, copy this address into the browser yourself:\n")
     print(f"  {url}\n")
-    print("Close the browser tab when you are done — this stops by itself a few")
+    print("Close the browser tab when you are done. This stops by itself a few")
     print("seconds later. No need to force-quit anything.")
     print("-" * 60)
 
