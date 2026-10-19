@@ -576,9 +576,8 @@ def test_contact_carry_forward(tmp):
     ):
         row = [""] * len(cols)
         row[0] = drug
-        row[i[sheets.MEMBER_COL]] = member
-        row[i[sheets.MEMBER_EMAIL_COL]] = mail
-        row[i[sheets.CONTACT_COL]] = contact
+        row[i[sheets.NAME_COL]] = member or contact
+        row[i[sheets.EMAIL_COL]] = mail
         row[i[sheets.OWNER_COL]] = owner
         prior.append(row)
     p = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-01.xlsx"),
@@ -586,18 +585,18 @@ def test_contact_carry_forward(tmp):
 
     got = sheets._prior_contacts(p)
     check("a filled-in contact is carried",
-          got.get("obecabtagene autoleucel", {}).get(sheets.CONTACT_COL),
+          got.get("obecabtagene autoleucel", {}).get(sheets.NAME_COL),
           "Pierre L-S")
     check("the AE owner is carried",
           got.get("obecabtagene autoleucel", {}).get(sheets.OWNER_COL), "JC")
-    check("a hand-typed ASCPT member is carried",
-          got.get("vipivotide tetraxetan", {}).get(sheets.MEMBER_COL),
+    check("a hand-typed contact name is carried",
+          got.get("vipivotide tetraxetan", {}).get(sheets.NAME_COL),
           "Sanne de Jong")
     check("and their address with it",
-          got.get("vipivotide tetraxetan", {}).get(sheets.MEMBER_EMAIL_COL),
+          got.get("vipivotide tetraxetan", {}).get(sheets.EMAIL_COL),
           "s.dejong@example.org")
     check("the columns do not bleed into each other",
-          got.get("vipivotide tetraxetan", {}).get(sheets.CONTACT_COL), None)
+          got.get("vipivotide tetraxetan", {}).get(sheets.OWNER_COL), "Erica")
     check("a wholly blank row is not carried", "olezarsen" in got, False)
 
     # The column this replaced. Dropping a column must MIGRATE what is in it:
@@ -613,28 +612,39 @@ def test_contact_carry_forward(tmp):
                           {sheets.HOTLIST_TAB: old_sheet})
     mig = sheets._prior_contacts(p2)
     check("the retired ASCPT column migrates, it is not dropped",
-          mig.get("obecabtagene autoleucel", {}).get(sheets.MEMBER_COL),
+          mig.get("obecabtagene autoleucel", {}).get(sheets.NAME_COL),
           "ASCPT: looked up by hand")
-    check("and it does NOT land in Clin pharm contact",
-          mig.get("obecabtagene autoleucel", {}).get(sheets.CONTACT_COL), None)
-    check("a value already in Clin pharm contact stays there",
-          mig.get("orforglipron calcium", {}).get(sheets.CONTACT_COL),
+    check("the retired general contact column migrates too",
+          mig.get("orforglipron calcium", {}).get(sheets.NAME_COL),
           "Lilly clin pharm lead")
+
+    # Three retired headers map onto ONE column now, so a row carrying two of
+    # them would silently lose one if the rightmost simply won. They are
+    # joined: a cell reading "A; B" can be pruned, a missing name cannot be
+    # noticed.
+    both = [["Drug name", "ClinPharm ASCPT Member", "Clin pharm contact"],
+            ["Aucatzyl (Obecabtagene autoleucel)", "Sanne de Jong", "Pierre L-S"]]
+    pb = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-04.xlsx"),
+                          {sheets.HOTLIST_TAB: both})
+    gb = sheets._prior_contacts(pb)
+    check("two retired columns on one row are joined, not dropped",
+          gb.get("obecabtagene autoleucel", {}).get(sheets.NAME_COL),
+          "Sanne de Jong; Pierre L-S")
 
     # These headers get reworded in Excel. An exact-string match would fail
     # silently and the next run would write a blank sheet.
-    reworded = [["Drug name", "ASCPT member (clin pharm)", "ASCPT member e-mail",
+    reworded = [["Drug name", "ASCPT member (clin pharm)", "Contact e-mail",
                  "Owner (AE)"],
                 ["AUCATZYL (obecabtagene autoleucel)", "Sanne de Jong",
                  "s@example.org", "JC"]]
     p3 = store.xlsx_write(os.path.join(tmp, "MOA outreach list 2026-01-03.xlsx"),
                           {sheets.HOTLIST_TAB: reworded})
     got3 = sheets._prior_contacts(p3)
-    check("a reworded member header still carries",
-          got3.get("obecabtagene autoleucel", {}).get(sheets.MEMBER_COL),
+    check("a reworded name header still carries",
+          got3.get("obecabtagene autoleucel", {}).get(sheets.NAME_COL),
           "Sanne de Jong")
-    check("a reworded member email header still carries",
-          got3.get("obecabtagene autoleucel", {}).get(sheets.MEMBER_EMAIL_COL),
+    check("a reworded email header still carries",
+          got3.get("obecabtagene autoleucel", {}).get(sheets.EMAIL_COL),
           "s@example.org")
     check("a reworded owner header still carries",
           got3.get("obecabtagene autoleucel", {}).get(sheets.OWNER_COL), "JC")
@@ -654,25 +664,28 @@ def test_column_order():
     """The sheet's columns, exactly as the editorial team specified them."""
     import sheets
     section("Outreach list column order")
-    check("ten columns", len(config.HOTLIST_COLUMNS), 10)
+    check("nine columns", len(config.HOTLIST_COLUMNS), 9)
     check("the order is as asked", config.HOTLIST_COLUMNS, [
         "Drug name", "MOA", "Indication", "NDA/BLA number", "Approval date",
-        "Company name", "ClinPharm ASCPT Member", "ClinPharm ASCPT Member email",
-        "Clin pharm contact", "AE owner"])
-    # The member pair is only legible read across, so nothing may come between.
-    check("the member pair is adjacent",
-          config.HOTLIST_COLUMNS.index(sheets.MEMBER_EMAIL_COL)
-          - config.HOTLIST_COLUMNS.index(sheets.MEMBER_COL), 1)
-    check("Clin pharm contact comes before AE owner",
-          config.HOTLIST_COLUMNS.index(sheets.CONTACT_COL)
-          < config.HOTLIST_COLUMNS.index(sheets.OWNER_COL), True)
-    check("exactly one ASCPT-named pair, no third column",
-          [c for c in config.HOTLIST_COLUMNS if "ASCPT" in c],
-          [sheets.MEMBER_COL, sheets.MEMBER_EMAIL_COL])
+        "Company name", "ClinPharm Contact Name", "ClinPharm Contact Email",
+        "AE owner"])
+    # The pair is only legible read across, so nothing may come between.
+    check("the contact pair is adjacent",
+          config.HOTLIST_COLUMNS.index(sheets.EMAIL_COL)
+          - config.HOTLIST_COLUMNS.index(sheets.NAME_COL), 1)
+    check("the pair sits straight after the company",
+          config.HOTLIST_COLUMNS[5:8],
+          ["Company name", sheets.NAME_COL, sheets.EMAIL_COL])
+    check("AE owner is last", config.HOTLIST_COLUMNS[-1], sheets.OWNER_COL)
+    # Three contact columns were collapsed into one pair on 2026-10-19. None of
+    # the old headings may survive, or the collapse did not happen.
+    check("no retired contact column is still on the sheet",
+          [c for c in sheets.RETIRED_NAME_HEADERS
+           if c in config.HOTLIST_COLUMNS], [])
     check("every team column is carried forward",
           [c for c in sheets.HUMAN_COLS if c not in config.HOTLIST_COLUMNS], [])
-    check("and they are the last four, in sheet order",
-          config.HOTLIST_COLUMNS[-4:], sheets.HUMAN_COLS)
+    check("and they are the last three, in sheet order",
+          config.HOTLIST_COLUMNS[-3:], sheets.HUMAN_COLS)
 
 
 def test_invitation_drafts():
@@ -692,7 +705,7 @@ def test_invitation_drafts():
     row[cols.index("MOA")] = "A CD19-directed autologous CAR-T cell therapy."
     row[cols.index("NDA/BLA number")] = "BLA 125813"
     row[cols.index(sheets.OWNER_COL)] = "JC"
-    row[cols.index(sheets.MEMBER_COL)] = "Sanne de Jong"
+    row[cols.index(sheets.NAME_COL)] = "Sanne de Jong"
     html_out = sheets.build_invites_html([row], 2027, cols)
 
     check("the drug name appears", "obecabtagene autoleucel" in html_out, True)
@@ -722,16 +735,15 @@ def test_invitation_drafts():
     # addressed to "1. Amita Joshi 2. Rong Shi" is worse than a blank one.
     many = [""] * len(cols)
     many[cols.index("Drug name")] = "Z (zdrug)"
-    many[cols.index(sheets.MEMBER_COL)] = "1. Amita Joshi\n2. Rong Shi"
+    many[cols.index(sheets.NAME_COL)] = "1. Amita Joshi\n2. Rong Shi"
     out3 = sheets.build_invites_html([many], 2027, cols)
     check("a multi-member cell asks for a choice",
           "choose one before sending" in out3, True)
-    many[cols.index(sheets.CONTACT_COL)] = "Amita Joshi"
+    many[cols.index(sheets.NAME_COL)] = "Amita Joshi"
     out4 = sheets.build_invites_html([many], 2027, cols)
-    check("an AE's single choice outranks the member list",
+    check("a single name needs no choice",
           "choose one before sending" in out4, False)
-    check("and it is the name used", ">Amita Joshi<" in out4
-          or "Contact:</b> Amita Joshi" in out4, True)
+    check("and it is the name used", "Amita Joshi" in out4, True)
 
 
 def _article(pmid, journal, authors_):
@@ -1159,13 +1171,13 @@ def test_member_column(tmp):
 
     # The member pair belongs to the team now, so it IS carried forward, and a
     # typed value must survive a run that also has an export to draw on.
-    check("the member column is carried forward",
-          sheets._human_col(sheets.MEMBER_COL), sheets.MEMBER_COL)
+    check("the contact name column is carried forward",
+          sheets._human_col(sheets.NAME_COL), sheets.NAME_COL)
     check("so is the email column",
-          sheets._human_col(sheets.MEMBER_EMAIL_COL), sheets.MEMBER_EMAIL_COL)
+          sheets._human_col(sheets.EMAIL_COL), sheets.EMAIL_COL)
 
-    typed = {sheets.MEMBER_COL: "someone I found myself",
-             sheets.MEMBER_EMAIL_COL: "me@example.org"}
+    typed = {sheets.NAME_COL: "someone I found myself",
+             sheets.EMAIL_COL: "me@example.org"}
     cells = sheets._team_cells(typed, "GENENTECH INC", recs)
     check("a typed member name is NOT overwritten by the export",
           cells[0], "someone I found myself")
@@ -1173,7 +1185,7 @@ def test_member_column(tmp):
 
     # Half-typed is the case that would break the alignment between the two
     # cells, so the engine leaves the pair alone if EITHER is filled.
-    half = sheets._team_cells({sheets.MEMBER_COL: "just a name"},
+    half = sheets._team_cells({sheets.NAME_COL: "just a name"},
                               "GENENTECH INC", recs)
     check("a half-filled pair is left alone", half[0], "just a name")
     check("and the engine does not fill the other half", half[1], "")
@@ -1184,7 +1196,7 @@ def test_member_column(tmp):
     check("with the addresses alongside",
           "ajoshi@gene.com" in filled[1], True)
     check("and nothing is invented with no export",
-          sheets._team_cells({}, "GENENTECH INC", []), ["", "", "", ""])
+          sheets._team_cells({}, "GENENTECH INC", []), ["", "", ""])
 
     # No file at all is the state the team is in until ASCPT sends the export.
     real = config.members_file

@@ -363,41 +363,47 @@ Highlights), and a child section may be "Limitations of Use" rather than an indi
 ## The outreach list is the only outreach output
 
 `dossier` was retired on 2026-10-08. `hotlist` writes
-`output/MOA outreach list <date>.xlsx`, one file per date, with ten columns
+`output/MOA outreach list <date>.xlsx`, one file per date, with nine columns
 (`config.HOTLIST_COLUMNS`) in this order:
 
-| # | Column | Owner |
+| Col | Column | Owner |
 |---|---|---|
-| 1-6 | Drug name, MOA, Indication, NDA/BLA number, Approval date, Company name | engine |
-| 7 | ClinPharm ASCPT Member | team |
-| 8 | ClinPharm ASCPT Member email | team |
-| 9 | Clin pharm contact | team |
-| 10 | AE owner | team |
+| A-F | Drug name, MOA, Indication, NDA/BLA number, Approval date, Company name | engine |
+| G | ClinPharm Contact Name | team |
+| H | ClinPharm Contact Email | team |
+| I | AE owner | team |
 
-**All four of the last columns belong to the team and all four carry forward.** They ship
-blank. Columns 7 and 8 were engine-only until 2026-10-08, when the team decided to fill them
-in by hand; carrying them forward stopped being optional at that moment, because a run that
-regenerated those cells would have handed back a blank sheet.
+**The last three belong to the team and all three carry forward.** They ship blank. G and H
+were engine-only until 2026-10-08, when the team decided to fill them in by hand; carrying
+them forward stopped being optional at that moment, because a run that regenerated those
+cells would have handed back a blank sheet.
 
 **A typed value always wins.** If an ASCPT membership export has been imported, the engine
-fills the pair too, but only where BOTH cells came back empty (`sheets._team_cells()`). The
-pair is filled or left alone together: filling a name while keeping a typed address would break
-the index alignment and put one person's name against another's address.
+fills G and H too, but only where BOTH came back empty (`sheets._team_cells()`). The pair is
+filled or left alone together: filling a name while keeping a typed address would break the
+index alignment and put one person's name against another's address.
 
-**Columns 7 and 8 are index-aligned.** Line 3 of one is the address of line 3 of the other, and
-a member with no address renders as `-` rather than being dropped. Every member at the company
-is listed, with any non-clinical-pharmacology discipline in parentheses and sorted after the
-unlabelled ones, so a regulatory contact can never read as a clinical pharmacologist. Company
-matching is `authors._is_sponsor` (Verastem Oncology is not Vera Therapeutics); the filter is
-`config.CLINPHARM_DISCIPLINES`, which excludes "clinical pharmacy", a different profession.
+**G and H are index-aligned.** Line 3 of one is the address of line 3 of the other, and a
+contact with no address renders as `-` rather than being dropped. When filled from an export,
+every member at the company is listed, with any non-clinical-pharmacology discipline in
+parentheses and sorted after the unlabelled ones, so a regulatory contact can never read as a
+clinical pharmacologist. Company matching is `authors._is_sponsor` (Verastem Oncology is not
+Vera Therapeutics); the filter is `config.CLINPHARM_DISCIPLINES`, which excludes "clinical
+pharmacy", a different profession.
 
-**There used to be a third ASCPT column**, a hand-filled
-`ClinPharm contact from ASCPT Membership Directory` beside the engine-filled pair. It was
-redundant and the team cut it on 2026-10-08. `sheets._human_col()` maps that retired header onto
-`MEMBER_COL`, so a value typed under it migrates rather than disappearing. **The test order in
-`_human_col()` is load-bearing**: email before ASCPT before owner before contact, because the
-retired header contains both "ascpt" and "contact" and the member email header contains both
-"ascpt" and "email". Reorder those branches and values silently land in the wrong column.
+**There were four contact columns at one point and now there are two.** A hand-filled
+`ClinPharm contact from ASCPT Membership Directory`, an engine-filled
+`ClinPharm ASCPT Member` pair, and a general `Clin pharm contact`. Collapsed to one pair on
+2026-10-19. Every retired heading is listed in `sheets.RETIRED_NAME_HEADERS` and maps onto
+`NAME_COL`, so values typed under the old names migrate rather than disappearing, and a row
+carrying TWO of them has both kept, **joined with a semicolon**: collapsing columns is exactly
+the moment a value gets silently dropped, and a cell reading "A; B" can be pruned while a
+missing name cannot be noticed.
+
+**The branch order in `sheets._human_col()` is load-bearing** and says so in its docstring:
+owner, then anything mentioning an address, then the name column. `ClinPharm Contact Email`
+contains "contact", and the oldest retired header contains both "ascpt" and "contact". Test
+the name column first and an address lands where a person should be.
 
 **The engine does not query the ASCPT directory and stores no credential for it.** Member data
 arrives only as a file someone entitled to it supplies (`roster --kind members`, or the GUI
@@ -407,27 +413,35 @@ addresses by automation rather than to the permission. The written request for a
 is at `output/ASCPT membership export request.md`. Do not add a scraper, and do not use the
 credentials that appear earlier in this project's transcripts.
 
-**`invites` drafts from `sheets.CONTACT_SOURCES`**, which is `Clin pharm contact` then
-`ClinPharm ASCPT Member`, in that preference order: the former is an AE's deliberate single
-choice, the latter may hold several candidates. A cell holding a numbered list of several
-members does not silently become the first name; `sheets.letter_contact()` returns a
-needs-narrowing flag and the draft says a choice is still required. Blank in both means no letter, and it reports how many were skipped.
+**`invites` drafts from `sheets.CONTACT_SOURCES`**, now just `ClinPharm Contact Name`. A cell
+holding a numbered list of several people does not silently become the first name:
+`sheets.letter_contact()` returns a needs-narrowing flag and the draft says a choice is still
+required. Blank means no letter, and it reports how many were skipped.
 
-**Carrying the three columns forward is load-bearing.** One file per date means a run
+**Carry-forward keys on the INN inside `BRAND (ingredient)`** via `sheets._contact_key()`,
+which shares `config.drug_key()` with the duplicate check below. One file per date means a run
 overwrites, so `sheets._prior_contacts()` reads today's file if it exists and otherwise the most
-recent earlier one, keyed on the INN inside `BRAND (ingredient)` (which also survives a brand
-re-capitalisation: `AUCATZYL` to `Aucatzyl`). Without it, every run would hand the team a blank
-sheet and silently discard a directory lookup done one row at a time.
+recent earlier one. The key survives a brand re-capitalisation (`AUCATZYL` to `Aucatzyl`).
 `config.latest_hotlist_path()` picks by the date in the FILENAME, not mtime, because Drive sync
-rewrites mtimes. Headers are matched **loosely** (`sheets._human_col()`): anything mentioning
-ASCPT is the directory column, anything mentioning an owner is the owner column. An exact-string
-match would break the moment someone reworded a header in Excel, and it would break silently.
+rewrites mtimes.
 
 **Hand-added drugs add to the priority block, they do not take its places.** `input/my drugs.txt`
 (one per line, brand or generic) goes through `sources.find_by_name()`, which deliberately
 bypasses the date window, the NME class filter and the novelty rule: the point of typing a drug
 is that a human judged it interesting, and it may well be older than the window. Verified
 against metformin (1995), Ozempic by brand, and vericiguat.
+
+**A hand-added drug the scan also finds appears ONCE.** Deduped in two places, which is
+deliberate: `cmd_hotlist` drops the scanned copy before the per-candidate loop, so the label
+and attention lookups are not paid twice, and `sheets.build_hotlist()` repeats the check because
+the sheet is what a person reads and one drug under two banners reads as two candidates. **The
+hand-added copy is the one kept**, since it is the copy that bypasses the window and the novelty
+rule, so keeping the scanned one instead could drop the row entirely on the next run. Matching
+is `config.drug_key()` on the FULL ingredient, never the application number: a drug typed by
+brand can resolve to a different application of the same molecule. The dedupe is NOT applied
+within the automatic block, because a known moiety arriving by a new route is deliberately its
+own row (intrathecal vs IV Zolgensma), and the two cefepime combinations differ only in their
+second ingredient.
 
 What retiring the dossier cost: ASCPT presence, poster times, "who to find", automatic contact
 matching. `authors.py` now has no caller and is dormant, though still covered by `selftest`.

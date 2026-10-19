@@ -1001,27 +1001,35 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
         L("WHAT THE LIST IS", ""),
         L("Purpose", "Find clinical pharmacology contacts at the companies behind "
                      "novel mechanisms the MOA mini-review series has not covered."),
-        L("Who fills it in", "The AE team owns the last four columns: 'ClinPharm "
-                             "ASCPT Member', 'ClinPharm ASCPT Member email', "
-                             "'Clin pharm contact' and 'AE owner'. All four ship "
-                             "empty and all four are carried forward on every "
-                             "later run."),
+        L("Who fills it in", "The AE team owns the last three columns: 'ClinPharm "
+                             "Contact Name', 'ClinPharm Contact Email' and 'AE "
+                             "owner'. All three ship empty and all three are "
+                             "carried forward on every later run."),
         L("Why they ship empty", "Pre-filling a contact with a paper's author would "
                                  "be worse than blank: that person is often not the "
                                  "right one to approach."),
-        L("Why the ASCPT pair is manual", "The engine does not query the ASCPT "
+        L("Why the contact pair is manual", "The engine does not query the ASCPT "
                                           "Membership Directory and stores no "
                                           "credential for it. An AE looks a person "
                                           "up and types the name in. The only "
                                           "automated route is an export someone "
                                           "entitled to the data supplies, imported "
                                           "with 'roster --kind members'."),
-        L("The ASCPT member pair", "'ClinPharm ASCPT Member' and 'ClinPharm ASCPT "
-                                   "Member email' are filled in by the team. They "
-                                   "are index-aligned: line 3 of one is the address "
-                                   "of line 3 of the other, and a member with no "
-                                   "address shows as '-' so a gap cannot shift the "
-                                   "lines below it onto the wrong person."),
+        L("The contact pair", "'ClinPharm Contact Name' and 'ClinPharm Contact "
+                              "Email' are filled in by the team and are "
+                              "index-aligned: line 3 of one is the address of line "
+                              "3 of the other, and a contact with no address shows "
+                              "as '-' so a gap cannot shift the lines below it onto "
+                              "the wrong person."),
+        L("There were three of these", "A hand-filled ASCPT directory column, an "
+                                       "engine-filled ASCPT member pair and a "
+                                       "general 'Clin pharm contact'. Collapsed to "
+                                       "one pair on 2026-10-19. Values typed under "
+                                       "any of the old headings are carried into "
+                                       "'ClinPharm Contact Name', and where a row "
+                                       "had two of them filled both are kept, "
+                                       "joined with a semicolon, rather than one "
+                                       "being dropped."),
         L("Typed values always win", "If an ASCPT membership export has been "
                                      "imported, the engine fills that pair too, but "
                                      "ONLY where BOTH cells came back empty. It "
@@ -1046,7 +1054,7 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
                                           "export states no discipline, every "
                                           "member at the company is listed and the "
                                           "status row above says so."),
-        L("Re-runs are safe", "Anything typed into those four columns is carried "
+        L("Re-runs are safe", "Anything typed into those three columns is carried "
                               "forward onto the next run, keyed on the drug rather "
                               "than the row, because the ranking changes between "
                               "runs. The headers are matched loosely, so rewording "
@@ -1139,6 +1147,15 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
         L("Rows shown", f"{shown} (capped; the analysis considered all "
                         f"{considered})"),
         L("Priority block", f"top {top} by hot score, highlighted on sheet 1"),
+        L("No duplicate rows", "A drug listed in input/my drugs.txt that the "
+                               "automatic scan also found appears ONCE, under "
+                               "'ADDED BY HAND'. The hand-added copy is the one "
+                               "kept, because it is the copy that bypasses the "
+                               "date window and the novelty rule. Matching is on "
+                               "the full ingredient, so the two cefepime "
+                               "combinations stay separate rows, and a known "
+                               "moiety arriving by a new route is still its own "
+                               "row."),
         L("Generated", datetime.date.today().isoformat()),
     ]
     if listed:
@@ -1163,41 +1180,40 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
 
 
 HOTLIST_TAB = "Outreach list"
-CONTACT_COL = "Clin pharm contact"
+NAME_COL = "ClinPharm Contact Name"
+EMAIL_COL = "ClinPharm Contact Email"
 OWNER_COL = "AE owner"
-MEMBER_COL = "ClinPharm ASCPT Member"
-MEMBER_EMAIL_COL = "ClinPharm ASCPT Member email"
 
-# All four belong to the team, in sheet order, and all four carry forward. The
-# member pair was engine-only until the team decided to fill it in by hand, at
-# which point carrying it forward stopped being optional: a run that
+# All three belong to the team, in sheet order, and all three carry forward.
+# The contact pair was engine-only until the team decided to fill it in by
+# hand, at which point carrying it forward stopped being optional: a run that
 # regenerated those cells would hand back a blank sheet and the typing would be
-# gone. The engine still fills the pair where a cell comes back EMPTY and a
+# gone. The engine still fills the pair where BOTH cells come back empty and a
 # membership export exists, but a typed value always wins.
-HUMAN_COLS = [MEMBER_COL, MEMBER_EMAIL_COL, CONTACT_COL, OWNER_COL]
+HUMAN_COLS = [NAME_COL, EMAIL_COL, OWNER_COL]
 
-# The columns that can name a recipient, in preference order. "Clin pharm
-# contact" comes first because it is an AE's deliberate single choice, where the
-# member column may legitimately hold several candidates.
-CONTACT_SOURCES = [CONTACT_COL, MEMBER_COL]
+# Only one column can name a recipient now. There were three at one point, with
+# a preference order between them, which is exactly the complexity the team cut.
+CONTACT_SOURCES = [NAME_COL]
+
+# Headers this sheet has carried for the same information, newest first. Values
+# typed under any of them migrate into NAME_COL rather than being dropped when
+# the column was renamed or removed.
+RETIRED_NAME_HEADERS = ["ClinPharm ASCPT Member", "Clin pharm contact",
+                        "ClinPharm contact from ASCPT Membership Directory"]
 
 
 def letter_contact(d):
     """-> (name, needs_narrowing) for one row's header->value mapping.
 
-    `needs_narrowing` is True when the only value available is a numbered list
-    of several members. A draft addressed to "1. Amita Joshi 2. Rong Shi" is
-    worse than one addressed to a blank, so the letter says a choice is still
-    needed rather than silently taking the first name.
+    `needs_narrowing` is True when the value is a numbered list of several
+    people. A draft addressed to "1. Amita Joshi 2. Rong Shi" is worse than one
+    addressed to a blank, so the letter says a choice is still needed rather
+    than silently taking the first name.
     """
-    by_col = {}
     for h, v in d.items():
-        col = _human_col(h)
-        if col in CONTACT_SOURCES and (v or "").strip():
-            by_col.setdefault(col, v.strip())
-    for col in CONTACT_SOURCES:
-        val = by_col.get(col)
-        if val:
+        if _human_col(h) in CONTACT_SOURCES and (v or "").strip():
+            val = v.strip()
             return val, "\n" in val
     return "", False
 
@@ -1223,54 +1239,52 @@ def _norm_header(h):
 
 
 def _human_col(header):
-    """Which of the team's four columns is this header, if any?
+    """Which of the team's three columns is this header, if any?
 
     Matched loosely on purpose. These headers get reworded by hand in Excel,
     and a carry-forward keyed on an exact string fails silently: the next run
     writes a blank sheet and the typed-in names are gone.
 
     **The test order is load-bearing**, because the headers overlap on
-    substrings. "ClinPharm ASCPT Member email" contains "ascpt", and the
-    retired "ClinPharm contact from ASCPT Membership Directory" contains both
-    "ascpt" and "contact". So email is tested before ASCPT, and ASCPT before
-    contact. Putting contact first sends the retired header to the wrong
-    column and silently moves one person's name onto another row's meaning.
+    substrings. "ClinPharm Contact Email" contains "contact", and the retired
+    "ClinPharm contact from ASCPT Membership Directory" contains both "ascpt"
+    and "contact". So owner is tested first (it is the only unambiguous one),
+    then anything that mentions an address, and only then the name column.
+    Putting the name test first sends the email column to the name column and
+    silently puts an address where a person should be.
 
-    That retired header maps onto MEMBER_COL deliberately: it is semantically
-    the same thing, a name someone looked up in the ASCPT directory, so a value
-    already typed under the old heading reappears in the new column instead of
-    being dropped when the column went away.
+    Every header this sheet has used for a contact name maps onto NAME_COL:
+    three columns were collapsed into one on 2026-10-19, and a value typed
+    under any of the old headings has to survive that.
     """
     h = re.sub(r"[^a-z]+", " ", (header or "").lower()).strip()
     if not h:
         return None
-    if "ascpt" in h and ("email" in h or "mail" in h):
-        return MEMBER_EMAIL_COL
-    if "ascpt" in h:
-        return MEMBER_COL
     if "owner" in h:
         return OWNER_COL
-    if "contact" in h:
-        return CONTACT_COL
+    if "email" in h or "mail" in h:
+        return EMAIL_COL
+    if "contact" in h or "ascpt" in h or "member" in h:
+        return NAME_COL
     return None
 
 
 def _team_cells(prior, sponsor, members):
-    """The team's four columns for one row, in HUMAN_COLS order.
+    """The team's three columns for one row, in HUMAN_COLS order.
 
     Precedence, which is the whole point of this function: a value the team
     typed wins over anything the engine can derive. The membership export only
     reaches a cell that carried forward EMPTY.
 
-    The member pair is filled or left alone TOGETHER. Filling a name from the
+    The contact pair is filled or left alone TOGETHER. Filling a name from the
     export while keeping a typed address, or the reverse, would break the index
     alignment between the two cells and put one person's name against
     another's address.
     """
     out = {c: (prior.get(c) or "") for c in HUMAN_COLS}
-    if members and not (out[MEMBER_COL] or out[MEMBER_EMAIL_COL]):
+    if members and not (out[NAME_COL] or out[EMAIL_COL]):
         names, emails, _how = members_at_company(sponsor, members)
-        out[MEMBER_COL], out[MEMBER_EMAIL_COL] = names, emails
+        out[NAME_COL], out[EMAIL_COL] = names, emails
     return [out[c] for c in HUMAN_COLS]
 
 
@@ -1284,7 +1298,7 @@ def _member_records():
     """
     path = config.members_file()
     if not os.path.exists(path):
-        return [], ("no ASCPT membership list imported, so '" + MEMBER_COL
+        return [], ("no ASCPT membership list imported, so '" + NAME_COL
                     + "' is whatever the team has typed "
                       "(import one with: roster --kind members)")
     try:
@@ -1307,8 +1321,14 @@ def _prior_contacts(path):
     so a positional carry-forward would move one drug's contact onto another.
 
     All three of the team's columns are carried, because all three are typed in
-    by hand and none of them can be regenerated. The ASCPT directory column in
-    particular represents a lookup someone did one row at a time.
+    by hand and none of them can be regenerated. The contact name in particular
+    represents a lookup someone did one row at a time.
+
+    Several retired headers map onto NAME_COL, so one row can carry two values
+    destined for the same cell. They are JOINED rather than letting the
+    rightmost column win: collapsing three columns into one is exactly the
+    moment a value gets dropped, and a cell reading "A; B" is something the
+    reader can prune, where a missing name is not something they can notice.
     """
     out = {}
     if not path or not os.path.exists(path):
@@ -1333,9 +1353,16 @@ def _prior_contacts(path):
         drug = (r[di] or "").strip()
         if not drug:
             continue
-        vals = {name: (r[i] or "").strip()
-                for i, name in cols.items()
-                if i < len(r) and (r[i] or "").strip()}
+        vals = {}
+        for i, name in sorted(cols.items()):
+            v = (r[i] or "").strip() if i < len(r) else ""
+            if not v:
+                continue
+            have = vals.get(name)
+            if have and v != have:
+                vals[name] = have + "; " + v
+            elif not have:
+                vals[name] = v
         if vals:
             out.setdefault(_contact_key(drug), {}).update(vals)
     return out
@@ -1370,7 +1397,19 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
     # places. A typed drug carries an editorial judgement the score cannot, so
     # letting it displace a high-scoring candidate would lose information.
     manual = [r for r in records if r.get("manual")]
-    auto = [r for r in records if not r.get("manual")]
+    # Belt and braces against the same drug appearing in both blocks. The
+    # caller already drops scanned duplicates, but this sheet is the thing a
+    # reader looks at, and one drug listed twice under two banners reads as two
+    # candidates. Deduped on the full ingredient, NOT within the automatic
+    # block: a known moiety arriving by a new route is deliberately a separate
+    # row (intrathecal vs IV Zolgensma), and collapsing those would delete a
+    # row the novelty rule exists to surface.
+    mkeys = {config.drug_key(r.get("ingredient_raw") or r.get("ingredient"))
+             for r in manual} - {""}
+    auto = [r for r in records
+            if not r.get("manual")
+            and config.drug_key(r.get("ingredient_raw") or r.get("ingredient"))
+            not in mkeys]
     ranked = sorted(auto, key=lambda r: -int(r.get("hot_score") or 0))
     total = total or len(ranked)
     ranked = ranked[:total]                 # the sheet is capped, not the analysis
@@ -1399,7 +1438,7 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
                 _appl_label(r),
                 r.get("approval_date", ""),
                 r.get("sponsor_raw", ""),
-                # The team's four columns, in sheet order. A value typed on an
+                # The team's three columns, in sheet order. A value typed on an
                 # earlier run always wins; the membership export only fills a
                 # cell that came back empty, and with no export imported these
                 # are simply whatever the team last typed.
@@ -1437,10 +1476,10 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
               f"= {len(manual) + len(ranked)} rows")
         if kept:
             print(f"    carried forward {kept} row(s) the team had filled in")
-        mi = header.index(MEMBER_COL)
+        mi = header.index(NAME_COL)
         hit = sum(1 for row in rows[1:]
                   if mi < len(row) and (row[mi] or "").strip())
         print(f"    {member_note}"
-              + (f"; {hit} row(s) have a member named" if members else ""))
+              + (f"; {hit} row(s) have a contact named" if members else ""))
         print(f"    -> {path}")
     return path

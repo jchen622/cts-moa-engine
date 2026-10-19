@@ -204,25 +204,29 @@ def dossier_name(year):
 
 
 # --------------------------------------------------------------- hot list
-# Ten columns, in the order the editorial team asked for. The first six the
-# engine derives from the FDA feeds and the label; the last four belong to the
-# team and the engine must never overwrite a value in any of them.
+# Nine columns. The first six the engine derives from the FDA feeds and the
+# label; the last three belong to the team and the engine must never overwrite
+# a value in any of them.
 #
-# The two ASCPT columns used to be three, with a hand-filled directory column
-# sitting beside an engine-filled one. That was redundant and the team cut it.
-# What remains is ONE pair, name and address, and the team fills them in by
-# hand. If an ASCPT membership export is ever imported (`roster --kind
-# members`) the engine fills the pair too, but ONLY where the cell came back
-# empty: a name someone typed always wins over anything regenerated.
+# There were four contact columns at one point (a hand-filled ASCPT directory
+# lookup, an engine-filled ASCPT member pair, and a general "Clin pharm
+# contact"), which was three too many. They collapse to ONE contact: a name and
+# an address. Where the name came from, the ASCPT directory or anywhere else,
+# is not something the sheet needs a column to record.
+#
+# The team fills the pair in by hand. If an ASCPT membership export is ever
+# imported (`roster --kind members`) the engine fills it too, but ONLY where
+# both cells came back empty: a name someone typed always wins over anything
+# regenerated.
 #
 # The pair is index-aligned. Line 2 of the name cell is the person whose
-# address is line 2 of the email cell, and a member with no address renders as
+# address is line 2 of the email cell, and a contact with no address renders as
 # "-" rather than being dropped, because a gap would shift every line below it
 # onto the wrong person.
 HOTLIST_COLUMNS = [
     "Drug name", "MOA", "Indication", "NDA/BLA number", "Approval date",
-    "Company name", "ClinPharm ASCPT Member", "ClinPharm ASCPT Member email",
-    "Clin pharm contact", "AE owner",
+    "Company name", "ClinPharm Contact Name", "ClinPharm Contact Email",
+    "AE owner",
 ]
 
 # The gap analysis still decides what is on the list and still drives the
@@ -251,6 +255,19 @@ MANUAL_DRUGS_FILE = "my drugs.txt"
 
 def manual_drugs_file():
     return os.path.join(input_dir(), MANUAL_DRUGS_FILE)
+
+
+def drug_key(name):
+    """A drug name reduced to a comparison key.
+
+    One normaliser, used for carrying contacts forward AND for keeping a
+    hand-added drug from appearing twice. Punctuation and case vary between the
+    FDA feeds and what someone types ("CEFEPIME HYDROCHLORIDE; ZIDEBACTAM" vs
+    "cefepime hydrochloride zidebactam"), but the FULL ingredient string is
+    kept: the two cefepime combinations differ only in their second ingredient
+    and are genuinely different products.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
 
 
 def manual_drugs():

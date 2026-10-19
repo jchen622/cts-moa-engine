@@ -347,8 +347,26 @@ def cmd_hotlist(args):
         print(f"  {len(manual_names)} drug(s) listed in "
               f"{os.path.basename(config.manual_drugs_file())}")
 
+    # A hand-added drug that ALSO comes through the automatic scan must appear
+    # once, not twice. The manual copy wins: it carries a human's judgement and
+    # it is the one that bypasses the window and the novelty rule, so dropping
+    # it in favour of the scanned copy could remove the row entirely. Keying on
+    # the full ingredient rather than the application number matters, because a
+    # drug typed by brand can resolve to a different application of the same
+    # molecule and the two would not collide on appl_no.
+    manual_keys = {config.drug_key(r.get("ingredient_raw") or r.get("ingredient"))
+                   for r in manual_recs}
+    manual_keys.discard("")
+    auto = [r for r in recs
+            if config.drug_key(r.get("ingredient_raw") or r.get("ingredient"))
+            not in manual_keys]
+    dropped = len(recs) - len(auto)
+    if dropped:
+        print(f"  {dropped} scanned candidate(s) also listed by hand; "
+              f"keeping the hand-added copy")
+
     out, considered = [], 0
-    queue = list(manual_recs) + list(recs)
+    queue = list(manual_recs) + auto
     for rec in queue:
         considered += 1
         _progress(considered, len(queue),

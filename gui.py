@@ -328,14 +328,15 @@ mini&#8209;review. Work down the list.</p>
  <div class="title">Build the outreach list</div>
  <div class="desc">Drugs with a <b>novel mechanism the mini-review series has not
  covered</b>, with the mechanism of action and approved indications from the FDA
- label. The top 20 are highlighted; 30 more follow. The <b>clin pharm contact
- column is left blank on purpose</b>: that is the column for the AE team
- to fill in. Anything already filled in is carried over.</div>
+ label. The top 20 are highlighted; 30 more follow. The <b>ClinPharm Contact Name
+ and Email columns are left blank on purpose</b>: those are the columns for the AE
+ team to fill in. Anything already filled in is carried over.</div>
  <div class="desc" id="whopulled" style="margin-top:8px"></div>
  <div class="desc" style="margin-top:10px"><b>Drugs you want included anyway</b>
   (one per line, brand or generic). These are added to the top 20 rather
   than taking its places, and they can be any age, so an older drug of interest
-  is fine. The engine fills in the mechanism, indications and application number.</div>
+  is fine. The engine fills in the mechanism, indications and application number.
+  A drug listed here that the scan also finds appears once, under "added by hand".</div>
  <div style="margin-top:6px;display:flex;gap:8px;align-items:flex-start">
   <textarea id="mydrugs" rows="3" spellcheck="false" placeholder="vericiguat
 Ozempic"
