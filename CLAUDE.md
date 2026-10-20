@@ -128,21 +128,27 @@ plain text. If the editorial group disagrees with a weight, that is a one-line c
 intended tuning point.
 
 **Hot-list weights live in `config.HOT_WEIGHTS`, and nothing else may hold a copy.**
-`classify.hot_score()` reads them and so does the rubric sheet
-(`sheets.hot_score_rubric_rows()`, tab 2 of the outreach workbook), so a weight changed in
-config moves both the ranking and the printed rubric together. A rubric typed out by hand would
-be a second copy of the weights, and a second copy is exactly how `PUBLISHED_MOA_DRUGS` came to
-say 19 while the series had published 22. `config.HOT_SCORE_RUBRIC` is the presentation layer:
-it references weight keys and never numbers. `config.hot_score_max()` derives the ceiling (110)
+`classify.hot_score()` reads them and so does the printed rubric
+(`sheets.hot_score_rows()`, section 2 of the Methodology sheet), so a weight changed in config
+moves both the ranking and the printed text together. A rubric typed out by hand would be a
+second copy of the weights, and a second copy is exactly how `PUBLISHED_MOA_DRUGS` came to say
+19 while the series had published 22. `config.HOT_SCORE_RUBRIC` is the presentation layer: it
+references weight keys and never numbers. `config.hot_score_max()` derives the ceiling (110)
 rather than stating it, because a bare "68" on a sheet says nothing without one.
 
-`selftest.test_hot_score_rubric` holds the three together: every weight appears on the sheet,
-the sheet names no weight that does not exist, a drug firing the top term of every group scores
+**The rubric had its own tab for one day (2026-10-20) and does not any more.** The team pointed
+out that the Methodology sheet already covers scoring, so it is one section of one sheet again.
+Do not re-add the tab. What the round trip was worth keeping was the generator: before it, the
+weights existed twice, once in `hot_score()` and once as prose on the methodology sheet.
+
+`selftest.test_hot_score_rubric` holds them together: every weight appears in the text, the
+text names no weight that does not exist, a drug firing the top term of every group scores
 exactly the stated ceiling, the gap tiers and the attention bands are exclusive with the
-boundaries on the right side (99 scores the 40-band, 100 the 100-band), and four pinned scores
-cannot shift. It also asserts **no code leaks onto the sheet**: the first draft printed
-`papers_24m >= 100` and `config.GAP_CATEGORIES` to a sheet the editorial team reads, so the
-test rejects `config.`, `sources.`, `>=` and `_` anywhere in the rubric text.
+boundaries on the right side (99 scores the 40-band, 100 the 100-band), four pinned scores
+cannot shift, the workbook really has two tabs, and the generated rows really reach the
+Methodology sheet rather than only existing as a function. It also asserts **no code leaks into
+the text**: the first draft printed `papers_24m >= 100` and `config.GAP_CATEGORIES` onto a sheet
+the editorial team reads, so the test rejects `config.`, `sources.`, `>=` and `_`.
 
 ## Source-format landmines
 
@@ -380,11 +386,9 @@ Highlights), and a child section may be "Limitations of Use" rather than an indi
 ## The outreach list is the only outreach output
 
 `dossier` was retired on 2026-10-08. `hotlist` writes
-`output/MOA outreach list <date>.xlsx`, one file per date, with **three tabs**: the list, then
-`Hot score rubric` (every term and what it is worth, generated from `config.HOT_WEIGHTS`), then
-`Methodology` (how the list was built, and the per-drug classification with its source). The
-rubric is tab 2 because it is what a reader wants the moment they ask why one drug sits above
-another; the methodology sheet points at it rather than restating the weights.
+`output/MOA outreach list <date>.xlsx`, one file per date, with **two tabs**: the list, and
+`Methodology` (how the list was built, the scoring terms generated from `config.HOT_WEIGHTS`,
+and the per-drug classification with its source).
 
 Sheet 1 has nine columns (`config.HOTLIST_COLUMNS`) in this order:
 

@@ -322,8 +322,7 @@ HOT_SCORE_RUBRIC = [
     {
         "name": "News-worthy",
         "exclusive": False,
-        "note": "Both can apply. Read from the Drugs@FDA bulk files, not "
-                "inferred.",
+        "note": "Read from the Drugs@FDA bulk files, not inferred.",
         "terms": [
             ("FDA priority review", "the application was granted priority "
                                     "review", "priority_review"),

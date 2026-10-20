@@ -1220,12 +1220,12 @@ def test_hot_score_rubric():
     """
     import classify
     import sheets
-    section("Hot score rubric is sheet 2, and matches the scorer")
+    section("Hot score terms match the scorer, on the Methodology sheet")
 
-    check("the rubric is the second tab", list(_rubric_tabs()).index(
-        sheets.RUBRIC_TAB), 1)
-    check("the outreach list is still the first",
-          list(_rubric_tabs())[0], sheets.HOTLIST_TAB)
+    # The rubric briefly had its own tab; the team pointed out the methodology
+    # sheet already covers scoring, so two tabs is the shape to hold.
+    check("two tabs, the list and the methodology", _rubric_tabs(),
+          [sheets.HOTLIST_TAB, "Methodology"])
 
     # Every weight is on the sheet, and the sheet invents none.
     keys = {k for g in config.HOT_SCORE_RUBRIC for _l, _c, k in g["terms"] if k}
@@ -1283,24 +1283,53 @@ def test_hot_score_rubric():
     check("a zero paper count is written out",
           any("no papers found" in w.lower() for w in why), True)
 
-    rows = sheets.hot_score_rubric_rows()
+    rows = sheets.hot_score_rows()
     flat = " ".join(c or "" for r in rows for c in r)
-    check("the sheet states the ceiling", str(config.hot_score_max()) in flat,
+    check("the section states the ceiling", str(config.hot_score_max()) in flat,
           True)
     check("every point value is printed",
           [v for v in config.HOT_WEIGHTS.values() if f"+{v}" not in flat], [])
-    check("it says the score does not decide inclusion",
-          "does NOT decide inclusion" in flat, True)
+    check("every group is named",
+          [g["name"] for g in config.HOT_SCORE_RUBRIC
+           if g["name"] not in flat], [])
+    # Counted over the group rows only. The ceiling row above them also uses
+    # the phrase, to explain what it means, which is not a fifth group.
+    group_text = " ".join(c or "" for r in rows[1:] for c in r)
+    check("the exclusive groups say so",
+          group_text.count("only the strongest applies"),
+          sum(1 for g in config.HOT_SCORE_RUBRIC if g["exclusive"]))
+    check("and the additive one does not",
+          group_text.count("all that apply"),
+          sum(1 for g in config.HOT_SCORE_RUBRIC if not g["exclusive"]))
     check("FAERS is recorded as rejected", "FAERS" in flat, True)
-    # This sheet is read by the editorial team, not by developers.
+    # This text is read by the editorial team, not by developers.
     for leak in ("config.", "sources.", "papers_24m", ">=", "_"):
-        check(f"no code leaks onto the sheet: {leak!r}", leak in flat, False)
-    check("four columns throughout",
-          sorted({len(r) for r in rows}), [4])
+        check(f"no code leaks into the text: {leak!r}", leak in flat, False)
+    check("two columns throughout", sorted({len(r) for r in rows}), [2])
+
+    # And it has to actually reach the sheet, not just exist as a function.
+    import store
+    d = tempfile.mkdtemp(prefix="moa-meth-")
+    try:
+        rec = {"ingredient": "x", "ingredient_raw": "X", "brand": "B",
+               "sponsor_raw": "S", "hot_score": 1, "moa": "m",
+               "indications": ["i"], "appl_no": "1", "appl_type": "NDA"}
+        report = {"live": True, "published": 22, "coverage": {}, "targets": {},
+                  "gap_categories": set(), "note": "t"}
+        p = sheets.build_hotlist([rec], report, 36, 1,
+                                 path=os.path.join(d, "x.xlsx"), verbose=False)
+        meth = " ".join(c or "" for r in store.xlsx_read(p, "Methodology")
+                        for c in r)
+        check("the terms are written to the Methodology sheet",
+              [v for v in config.HOT_WEIGHTS.values() if f"+{v}" not in meth], [])
+        check("and nothing points at a tab that no longer exists",
+              "rubric' sheet" in meth.lower(), False)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def _rubric_tabs():
-    """The tab order build_hotlist writes, without running a scan."""
+    """The tabs build_hotlist writes, without running a scan."""
     import sheets
     rec = {"ingredient": "x", "ingredient_raw": "X", "brand": "B",
            "sponsor_raw": "S", "hot_score": 1, "moa": "m", "indications": ["i"],
