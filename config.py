@@ -257,6 +257,126 @@ def manual_drugs_file():
     return os.path.join(input_dir(), MANUAL_DRUGS_FILE)
 
 
+# ------------------------------------------------------- hot score rubric
+# ONE source for every weight. `classify.hot_score()` reads these and so does
+# the rubric sheet, so the printed rubric cannot drift from the code that
+# scored the rows, which is exactly how `PUBLISHED_MOA_DRUGS` ended up stating
+# 19 when the series had published 22.
+HOT_WEIGHTS = {
+    "gap_category":    40,
+    "gap_modality":    12,
+    "gap_target":       8,
+    "first_moiety":    20,
+    "new_route":        8,
+    "priority_review": 12,
+    "orphan":           8,
+    "papers_100":      20,
+    "papers_40":       14,
+    "papers_15":        8,
+    "papers_any":       3,
+    "trials_20":       10,
+    "trials_5":         6,
+    "trials_any":       2,
+}
+
+# The rubric as the team reads it. `exclusive` means only the highest-scoring
+# term in the group can fire, which is what makes the group's contribution to
+# the ceiling its maximum rather than its sum.
+HOT_SCORE_RUBRIC = [
+    {
+        "name": "Interesting mechanism",
+        "exclusive": True,
+        "note": "Only the strongest tier scores. A flat test let "
+                "\"MRI contrast agent\" outrank a real CAR-T gap the team "
+                "had named, so the tiers are ordered and exclusive.",
+        "terms": [
+            ("A named coverage gap, still open",
+             "the mechanism is one of the categories the team has named as a "
+             "gap, and the series still has not published in it",
+             "gap_category"),
+            ("No published review of this modality",
+             "nothing published on this molecular format or anything under it, "
+             "so an antibody-drug conjugate counts as an antibody",
+             "gap_modality"),
+            ("No published review of this target class",
+             "no review of this pharmacologic class. Weakest of the three: "
+             "there are far more target classes than formats, so this is true "
+             "of nearly everything", "gap_target"),
+        ],
+    },
+    {
+        "name": "Novelty of the approval",
+        "exclusive": True,
+        "note": "Taken from the novelty check the engine already ran, not "
+                "re-decided here.",
+        "terms": [
+            ("First approval of this moiety",
+             "no earlier FDA approval of this active moiety by any route",
+             "first_moiety"),
+            ("Known moiety arriving by a new route",
+             "same moiety, new route of administration, often under a new "
+             "brand (intrathecal Zolgensma, ophthalmic bevacizumab)",
+             "new_route"),
+        ],
+    },
+    {
+        "name": "News-worthy",
+        "exclusive": False,
+        "note": "Both can apply. Read from the Drugs@FDA bulk files, not "
+                "inferred.",
+        "terms": [
+            ("FDA priority review", "the application was granted priority "
+                                    "review", "priority_review"),
+            ("Orphan designation", "the application carries an orphan-drug "
+                                   "designation", "orphan"),
+        ],
+    },
+    {
+        "name": "Attention: publications",
+        "exclusive": True,
+        "note": "PubMed records naming the drug, in the 24 months before the "
+                "run. Banded rather than linear, because the difference "
+                "between 3 and 8 papers is noise and the difference between 8 "
+                "and 300 is not.",
+        "terms": [
+            ("100 or more papers", "", "papers_100"),
+            ("40 to 99 papers", "", "papers_40"),
+            ("15 to 39 papers", "", "papers_15"),
+            ("1 to 14 papers", "", "papers_any"),
+            ("No papers found", "scores nothing, and the row says so rather "
+                                "than leaving it unexplained", None),
+        ],
+    },
+    {
+        "name": "Attention: trials",
+        "exclusive": True,
+        "note": "Registered studies naming the drug on ClinicalTrials.gov.",
+        "terms": [
+            ("20 or more trials", "", "trials_20"),
+            ("5 to 19 trials", "", "trials_5"),
+            ("1 to 4 trials", "", "trials_any"),
+        ],
+    },
+]
+
+
+def hot_score_max():
+    """The highest score any drug could reach, from the rubric itself.
+
+    Printed on the rubric sheet because a bare "68" says nothing without a
+    ceiling, and hardcoding the ceiling is how it would come to disagree with
+    the weights above.
+    """
+    total = 0
+    for group in HOT_SCORE_RUBRIC:
+        # A term with no weight key is explanatory (the "no papers found" row,
+        # which exists so a zero is stated rather than left unexplained) and
+        # must not be read as a scoring term.
+        pts = [HOT_WEIGHTS[k] for _l, _c, k in group["terms"] if k]
+        total += max(pts) if group["exclusive"] else sum(pts)
+    return total
+
+
 def drug_key(name):
     """A drug name reduced to a comparison key.
 

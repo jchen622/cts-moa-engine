@@ -106,60 +106,68 @@ def hot_score(rec, gap_tier, gap_reason, attention):
     Ordering only. It does not decide what belongs on the list: that is the gap
     test, and the gap test does not consider whether a contact exists.
     """
+    W = config.HOT_WEIGHTS           # one source, shared with the rubric sheet
     score, why = 0, []
 
-    # --- interesting mechanism. Tiered: a named coverage gap the team has
-    # already agreed matters outranks "no review exists in this mechanism
-    # class", which is true of most things and so says much less.
-    if gap_tier == "category":
-        score += 40
-        why.append(f"named coverage gap (+40) [{gap_reason}]")
-    elif gap_tier == "modality":
-        score += 12
-        why.append(f"no review of this modality (+12) [{gap_reason}]")
-    elif gap_tier == "target":
-        # Weakest of the three. A format the series has covered repeatedly can
-        # still hide an unexamined target class, which is worth surfacing but
-        # says less than an untouched modality: there are far more target
-        # classes than formats, so nearly everything is a gap on this axis.
-        score += 8
-        why.append(f"no review of this target class (+8) [{gap_reason}]")
+    # --- interesting mechanism. Tiered and exclusive: a named coverage gap the
+    # team has already agreed matters outranks "no review exists in this
+    # mechanism class", which is true of most things and so says much less.
+    tier_key = {"category": "gap_category", "modality": "gap_modality",
+                "target": "gap_target"}.get(gap_tier)
+    tier_text = {"gap_category": "named coverage gap",
+                 "gap_modality": "no review of this modality",
+                 "gap_target": "no review of this target class"}
+    if tier_key:
+        score += W[tier_key]
+        why.append(f"{tier_text[tier_key]} (+{W[tier_key]}) [{gap_reason}]")
+
     nov = (rec.get("novelty_reason") or rec.get("Novelty") or "")
     if "first approval of this moiety" in nov.lower():
-        score += 20
-        why.append("first approval of this moiety (+20)")
+        score += W["first_moiety"]
+        why.append(f"first approval of this moiety (+{W['first_moiety']})")
     elif "new route" in nov.lower() or "new brand" in nov.lower():
-        score += 8
-        why.append("known moiety by a new route (+8)")
+        score += W["new_route"]
+        why.append(f"known moiety by a new route (+{W['new_route']})")
 
-    # --- news-worthy, from Drugs@FDA review designations
+    # --- news-worthy, from Drugs@FDA review designations. Both can apply.
     if rec.get("priority_review"):
-        score += 12
-        why.append("FDA priority review (+12)")
+        score += W["priority_review"]
+        why.append(f"FDA priority review (+{W['priority_review']})")
     if rec.get("orphan"):
-        score += 8
-        why.append("orphan designation (+8)")
+        score += W["orphan"]
+        why.append(f"orphan designation (+{W['orphan']})")
 
-    # --- attention
+    # --- attention. Banded, not linear: the gap between 3 and 8 papers is
+    # noise and the gap between 8 and 300 is not.
     papers = int(attention.get("papers_24m") or 0)
-    if papers >= 100:
-        score += 20; why.append(f"{papers} papers in 24 months (+20)")
-    elif papers >= 40:
-        score += 14; why.append(f"{papers} papers in 24 months (+14)")
-    elif papers >= 15:
-        score += 8;  why.append(f"{papers} papers in 24 months (+8)")
-    elif papers:
-        score += 3;  why.append(f"{papers} papers in 24 months (+3)")
+    band = _band(papers, [(100, "papers_100"), (40, "papers_40"),
+                          (15, "papers_15"), (1, "papers_any")])
+    if band:
+        score += W[band]
+        why.append(f"{papers} papers in 24 months (+{W[band]})")
     else:
         why.append("no papers found in 24 months (0)")
+
     trials = int(attention.get("trials") or 0)
-    if trials >= 20:
-        score += 10; why.append(f"{trials} trials (+10)")
-    elif trials >= 5:
-        score += 6;  why.append(f"{trials} trials (+6)")
-    elif trials:
-        score += 2;  why.append(f"{trials} trials (+2)")
+    band = _band(trials, [(20, "trials_20"), (5, "trials_5"), (1, "trials_any")])
+    if band:
+        score += W[band]
+        why.append(f"{trials} trials (+{W[band]})")
     return score, why
+
+
+def _band(value, thresholds):
+    """-> the weight key for the highest threshold `value` reaches, or None.
+
+    Thresholds are given highest-first and the first match wins, so the bands
+    stay exclusive. Written once rather than as two if/elif ladders, because
+    the ladders and the rubric sheet were the two places a band could be
+    changed in only one of them.
+    """
+    for floor, key in thresholds:
+        if value >= floor:
+            return key
+    return None
 
 
 def novelty_score(rec, mod, gap, prior_review):

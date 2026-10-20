@@ -991,6 +991,64 @@ def write_invites(year, rows, columns=None, dry_run=True):
 
 
 # ---------------------------------------------------------------- hot list
+def hot_score_rubric_rows():
+    """Sheet 2: every term that can add to a hot score, and what it is worth.
+
+    Built from `config.HOT_SCORE_RUBRIC` and `config.HOT_WEIGHTS`, which are
+    the same values `classify.hot_score()` adds up. That matters more than it
+    looks: a rubric typed out by hand is a second copy of the weights, and a
+    second copy is how `PUBLISHED_MOA_DRUGS` came to say 19 while the series
+    had published 22. Change a weight in config and this sheet follows.
+    """
+    L = lambda *c: list(c)
+    rows = [L("Hot score rubric", "", "", "")]
+    rows += [
+        L("", "", "", ""),
+        L("WHAT THE SCORE IS FOR", "", "", ""),
+        L("It sets the order", "Nothing else. The score decides which 20 drugs "
+                               "are highlighted as priority and the order rows "
+                               "appear in.", "", ""),
+        L("It does NOT decide inclusion", "That is the gap test alone: has the "
+                                          "mini-review series published on this "
+                                          "mechanism. See the Methodology sheet.", "", ""),
+        L("Highest possible score", str(config.hot_score_max()),
+          "Exclusive groups contribute their largest term, additive groups "
+          "their sum.", ""),
+        L("Every term is written on the row", "The 'why' behind each score is "
+                                              "recorded per drug in the run log, "
+                                              "so a number can always be taken "
+                                              "apart.", "", ""),
+        L("", "", "", ""),
+        L("THE TERMS", "", "", "Points"),
+    ]
+    for group in config.HOT_SCORE_RUBRIC:
+        # A term with no weight key is explanatory, not scoring.
+        pts = [config.HOT_WEIGHTS[k] for _l, _c, k in group["terms"] if k]
+        cap = max(pts) if group["exclusive"] else sum(pts)
+        rows.append(L("", "", "", ""))
+        rows.append(L(group["name"],
+                      "ONE of these at most" if group["exclusive"]
+                      else "all that apply",
+                      group["note"], f"up to {cap}"))
+        for label, condition, key in group["terms"]:
+            pt = f"+{config.HOT_WEIGHTS[key]}" if key else "0"
+            rows.append(L("", label, condition, pt))
+    rows += [
+        L("", "", "", ""),
+        L("DELIBERATELY EXCLUDED", "", "", ""),
+        L("FAERS adverse-event counts", "Tested and rejected.",
+          "They measure accumulated patient exposure, so they rank the oldest "
+          "drugs highest and say almost nothing about a drug approved in the "
+          "last three years.", ""),
+        L("ASCPT attendance", "Reported elsewhere, never scored.",
+          "A drug must not outrank a better one because its sponsor travels.", ""),
+        L("Whether a contact is known", "Not part of the score or the gap test.",
+          "Finding those contacts is the point of the sheet, so letting it "
+          "filter or rank would be circular.", ""),
+    ]
+    return rows
+
+
 def _hotlist_methodology(report, months, top, considered, shown, listed=None,
                          member_note=""):
     """Sheet 2. Written so a weight can be argued with, not just trusted."""
@@ -1098,24 +1156,10 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
                        "because finding those contacts is the point of the sheet."),
         L("", ""),
         L("2. HOT SCORE  (decides the order only)", ""),
-        L("Interesting mechanism", "named coverage gap still open +40; "
-                                   "unpublished molecular format +12; "
-                                   "unpublished target class +8; first approval "
-                                   "of this moiety +20; known moiety by a new "
-                                   "route +8. The three gap tiers are "
-                                   "exclusive, strongest first: a flat test let "
-                                   "'MRI contrast agent' outrank a real CAR-T "
-                                   "gap the team had named."),
-        L("News-worthy", "FDA priority review +12; orphan designation +8. Both come "
-                         "from the Drugs@FDA bulk files (Submissions.ReviewPriority "
-                         "and SubmissionPropertyType)."),
-        L("Attention", "PubMed papers in the last 24 months: >=100 +20, >=40 +14, "
-                       ">=15 +8, any +3. ClinicalTrials.gov studies: >=20 +10, "
-                       ">=5 +6, any +2."),
-        L("Deliberately excluded", "FAERS adverse-event report counts. They measure "
-                                   "accumulated patient exposure, so they rank older "
-                                   "drugs highest and say almost nothing about a drug "
-                                   "approved in the last three years."),
+        L("Full rubric", "On the '" + RUBRIC_TAB + "' sheet, every term and "
+                         "what it is worth. Generated from the same weights the "
+                         "engine adds up, so the two cannot disagree."),
+        L("Highest possible score", str(config.hot_score_max())),
         L("", ""),
         L("3. TIME WINDOW", ""),
         L("Window used", f"{months} months before today"),
@@ -1180,6 +1224,7 @@ def _hotlist_methodology(report, months, top, considered, shown, listed=None,
 
 
 HOTLIST_TAB = "Outreach list"
+RUBRIC_TAB = "Hot score rubric"
 NAME_COL = "ClinPharm Contact Name"
 EMAIL_COL = "ClinPharm Contact Email"
 OWNER_COL = "AE owner"
@@ -1457,7 +1502,11 @@ def build_hotlist(records, report, months, top, total=None, path=None, verbose=T
         block(f"ALSO UNCOVERED  -  {len(rest)} further candidates, not prioritised",
               rest)
 
+    # Tab order is the dict order: the list, then the rubric behind it, then
+    # the methodology. The rubric is sheet 2 because it is the thing a reader
+    # wants the moment they ask why one drug is above another.
     tabs = {HOTLIST_TAB: rows,
+            RUBRIC_TAB: hot_score_rubric_rows(),
             "Methodology": _hotlist_methodology(report, months, top,
                                                 len(records), len(ranked),
                                                 listed=manual + ranked,

@@ -1210,6 +1210,112 @@ def test_member_column(tmp):
         config.members_file = real
 
 
+def test_hot_score_rubric():
+    """The printed rubric and the code that scores share one set of weights.
+
+    A rubric typed out by hand is a second copy of the weights, and a second
+    copy is how config.PUBLISHED_MOA_DRUGS came to say 19 while the series had
+    published 22. So the sheet is generated from config.HOT_WEIGHTS, and these
+    checks hold the generator, the scorer and the ceiling together.
+    """
+    import classify
+    import sheets
+    section("Hot score rubric is sheet 2, and matches the scorer")
+
+    check("the rubric is the second tab", list(_rubric_tabs()).index(
+        sheets.RUBRIC_TAB), 1)
+    check("the outreach list is still the first",
+          list(_rubric_tabs())[0], sheets.HOTLIST_TAB)
+
+    # Every weight is on the sheet, and the sheet invents none.
+    keys = {k for g in config.HOT_SCORE_RUBRIC for _l, _c, k in g["terms"] if k}
+    check("every weight appears in the rubric",
+          sorted(set(config.HOT_WEIGHTS) - keys), [])
+    check("the rubric names no weight that does not exist",
+          sorted(keys - set(config.HOT_WEIGHTS)), [])
+
+    # The ceiling is derived, not typed. Exclusive groups contribute their
+    # largest term; additive groups their sum.
+    check("the ceiling is computed from the weights",
+          config.hot_score_max(), 40 + 20 + 20 + 20 + 10)
+
+    # A drug that fires the top term of every group must reach exactly that
+    # ceiling. This is the check that fails if a weight is changed in one place.
+    best = classify.hot_score(
+        {"novelty_reason": "first approval of this moiety",
+         "priority_review": True, "orphan": True},
+        "category", "reason", {"papers_24m": 500, "trials": 99})[0]
+    check("a maximal drug scores the stated ceiling", best,
+          config.hot_score_max())
+
+    # Pinned scores, so a refactor of hot_score cannot quietly shift ranking.
+    for rec, tier, att, want in (
+            ({"novelty_reason": "new route"}, "modality",
+             {"papers_24m": 50, "trials": 7}, 40),
+            ({"novelty_reason": ""}, "target",
+             {"papers_24m": 20, "trials": 2}, 18),
+            ({"novelty_reason": ""}, "", {"papers_24m": 0, "trials": 0}, 0),
+            ({"novelty_reason": "first approval of this moiety"}, "",
+             {"papers_24m": 3, "trials": 0}, 23)):
+        got, _why = classify.hot_score(rec, tier, "r", att)
+        check(f"pinned score {want}", got, want)
+
+    # The gap tiers are exclusive: only the strongest may fire.
+    rec, att = {"novelty_reason": ""}, {"papers_24m": 0, "trials": 0}
+    tiers = [classify.hot_score(rec, t, "r", att)[0]
+             for t in ("category", "modality", "target")]
+    check("the gap tiers are strictly ordered", tiers,
+          sorted(tiers, reverse=True))
+    check("and only one of them scores", tiers[0],
+          config.HOT_WEIGHTS["gap_category"])
+
+    # The bands are exclusive too, and the boundaries land on the right side.
+    for papers, want in ((99, "papers_40"), (100, "papers_100"),
+                         (14, "papers_any"), (15, "papers_15")):
+        got = classify.hot_score(rec, "", "r",
+                                 {"papers_24m": papers, "trials": 0})[0]
+        check(f"{papers} papers scores {config.HOT_WEIGHTS[want]}", got,
+              config.HOT_WEIGHTS[want])
+
+    # Zero is stated rather than left unexplained, which is why the rubric
+    # carries a row worth no points at all.
+    _s, why = classify.hot_score(rec, "", "r", {"papers_24m": 0, "trials": 0})
+    check("a zero paper count is written out",
+          any("no papers found" in w.lower() for w in why), True)
+
+    rows = sheets.hot_score_rubric_rows()
+    flat = " ".join(c or "" for r in rows for c in r)
+    check("the sheet states the ceiling", str(config.hot_score_max()) in flat,
+          True)
+    check("every point value is printed",
+          [v for v in config.HOT_WEIGHTS.values() if f"+{v}" not in flat], [])
+    check("it says the score does not decide inclusion",
+          "does NOT decide inclusion" in flat, True)
+    check("FAERS is recorded as rejected", "FAERS" in flat, True)
+    # This sheet is read by the editorial team, not by developers.
+    for leak in ("config.", "sources.", "papers_24m", ">=", "_"):
+        check(f"no code leaks onto the sheet: {leak!r}", leak in flat, False)
+    check("four columns throughout",
+          sorted({len(r) for r in rows}), [4])
+
+
+def _rubric_tabs():
+    """The tab order build_hotlist writes, without running a scan."""
+    import sheets
+    rec = {"ingredient": "x", "ingredient_raw": "X", "brand": "B",
+           "sponsor_raw": "S", "hot_score": 1, "moa": "m", "indications": ["i"],
+           "appl_no": "1", "appl_type": "NDA"}
+    report = {"live": True, "published": 22, "coverage": {}, "targets": {},
+              "gap_categories": set(), "note": "t"}
+    d = tempfile.mkdtemp(prefix="moa-rubric-")
+    try:
+        p = sheets.build_hotlist([rec], report, 36, 1,
+                                 path=os.path.join(d, "x.xlsx"), verbose=False)
+        return store.tab_names(p)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="moa-selftest-")
     print(f"Self-test — local file layer. Scratch dir: {tmp}")
@@ -1232,6 +1338,7 @@ def main():
         test_gui_endpoints(tmp)
         test_python_floor(tmp)
         test_column_order()
+        test_hot_score_rubric()
         test_contact_carry_forward(tmp)
         test_invitation_drafts()
         test_member_column(tmp)
